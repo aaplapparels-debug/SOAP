@@ -26,7 +26,7 @@ st.set_page_config(
 )
 
 config = load_config()
-dashboard_cfg = config["dashboard"]
+dashboard_cfg = config.get("dashboard", {})
 SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
 
