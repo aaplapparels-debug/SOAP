@@ -1,65 +1,92 @@
-"""
-config_loader.py
+"""config_loader.py
 
-Loads settings from config.<env>.yaml, where <env> is picked up from an
-environment variable (defaults to "dev" if you don't set one). This is
-the one piece of code that knows *which* config file to read -- nothing
-else in the project should hardcode a path or a password.
-
-Python concepts here:
-- `os.environ.get("NAME", "default")` reads an operating-system
-  environment variable. This is the standard place to put secrets
-  (passwords, API keys) -- NOT in a file that might get committed to
-  git or shared in a chat. Set one in PowerShell with:
-      $env:SHOPER_SA_PASSWORD = "your-real-password"
-  It only lasts for that terminal session unless you set it more
-  permanently through Windows' System Properties > Environment Variables.
-- `with open(...) as f:` is Python's standard way to open a file safely
-  -- it automatically closes the file when the block ends, even if
-  something inside the block errors out. You'll see this pattern
-  constantly in Python code.
-- A dict (short for "dictionary") is Python's key-value structure --
-  after `yaml.safe_load`, the whole config file becomes nested dicts
-  and lists you can index into with square brackets, e.g.
-  config["sql_server"]["host"].
+Unified configuration loader supporting both Streamlit Community Cloud
+(via st.secrets) and local development (via YAML/JSON or environment variables).
 """
+
 import json
 import os
 import yaml
 
+try:
+    import streamlit as st
+except ImportError:
+    st = None
+
 
 def load_config() -> dict:
+    config = {}
+
+    # 1. Streamlit Secrets (Priority for Cloud Deployment)
+    if st is not None:
+        try:
+            if "postgres" in st.secrets:
+                return st.secrets
+        except Exception:
+            # st.secrets raises FileNotFoundError if .streamlit/secrets.toml doesn't exist locally
+            pass
+
+    # 2. Local config files (Search in current folder, Src/, and project root)
     env = os.environ.get("APP_ENV", "dev")
-    config_path = f"config.{env}.yaml"
-    
-    
-    # 1. Streamlit Cloud Secrets (Production)
-    if hasattr(st, "secrets") and "postgres" in st.secrets:
-        return st.secrets
-        
-    # 2. Local config file (Development)
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.abspath(os.path.join(current_dir, ".."))
 
-    # Fill in the password from the environment, never from the file.
-    config["sql_server"]["sa_password"] = os.environ.get("SHOPER_SA_PASSWORD", "")
+    search_dirs = [os.getcwd(), current_dir, parent_dir]
+    file_candidates = [
+        f"config.{env}.yaml",
+        f"config.{env}.yml",
+        "config.yaml",
+        "config.yml",
+        "config.json",
+    ]
 
-    if not config["sql_server"]["sa_password"]:
-        # Fail loudly and immediately rather than silently connecting
-        # with a blank password and getting a confusing error later.
-        raise RuntimeError(
-            "SHOPER_SA_PASSWORD environment variable is not set. "
-            "Set it before running this script."
-        )
+    config_path = None
+    for directory in search_dirs:
+        for filename in file_candidates:
+            candidate = os.path.join(directory, filename)
+            if os.path.exists(candidate):
+                config_path = candidate
+                break
+        if config_path:
+            break
 
-    return config
+    if config_path:
+        with open(config_path, "r", encoding="utf-8") as f:
+            if config_path.endswith((".yaml", ".yml")):
+                config = yaml.safe_load(f) or {}
+            elif config_path.endswith(".json"):
+                config = json.load(f) or {}
+
+    # 3. Environment Variables Fallback
+    env_postgres = os.environ.get("POSTGRES_CONNECTION_STRING") or os.environ.get(
+        "DATABASE_URL"
+    )
+    if env_postgres:
+        config.setdefault("postgres", {})["connection_string"] = env_postgres
+
+    # Support legacy SQL Server env password if applicable
+    if "sql_server" in config:
+        sa_password = os.environ.get("SHOPER_SA_PASSWORD")
+        if sa_password:
+            config["sql_server"]["sa_password"] = sa_password
+
+    # 4. Validation
+    if "postgres" in config and "connection_string" in config["postgres"]:
+        return config
+
+    if config:
+        return config
+
+    raise RuntimeError(
+        "PostgreSQL configuration not found. Please provide credentials via:\n"
+        "1. Streamlit Cloud Secrets: [postgres] connection_string\n"
+        "2. Local .streamlit/secrets.toml\n"
+        "3. config.dev.yaml or config.json containing a 'postgres' -> 'connection_string' key."
+    )
 
 
 if __name__ == "__main__":
-    # Quick manual check: run `python config_loader.py` by itself to
-    # confirm your config file and env var are both set up correctly,
-    # without needing to touch SQL Server or Shoper at all.
     cfg = load_config()
-    print(f"Loaded config for tenant: {cfg['tenant']}")
-    print(f"Divisions found: {[d['name'] for d in cfg['divisions']]}")
-    print(f"Backup watch folder: {cfg['backup']['watch_folder']}")
+    print("Configuration loaded successfully.")
+    if "postgres" in cfg:
+        print("PostgreSQL connection string detected.")
