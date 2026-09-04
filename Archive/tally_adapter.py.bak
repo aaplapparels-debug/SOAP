@@ -1,0 +1,432 @@
+"""
+tally_adapter.py
+
+Adapter for extracting canonical financial data (outstanding debtors,
+receipts/collections with payment detail, credit notes) from Tally via
+its local XML/HTTP API. Fundamentally different mechanism from
+ShoperAdapter, which queries SQL Server directly -- Tally exposes a
+TDL (Tally Definition Language) interface over HTTP: POST an XML
+request describing what's wanted, Tally returns XML back.
+
+STATUS: extract_outstanding reuses an XML request shape already proven
+against this real Tally install (from earlier work in this project).
+extract_receipts and extract_credit_notes are NEWER -- built on
+Tally's documented bill-wise allocation mechanism (BILLALLOCATIONS.LIST)
+plus a best-effort guess at which field names carry payment/bank
+detail (LEDGERNAME, BANKALLOCATIONS.LIST's own children) -- NOT yet
+confirmed against real receipts with both cash and bank/cheque
+payments. Verify carefully before trusting this in a report.
+
+PDC is no longer a separate extraction. Once receipts carry
+instrument_date directly, "is this a PDC" is just a filter
+(instrument_date > today) applied at query/dashboard time -- not
+something that needs its own duplicated extraction logic here.
+
+Deliberately NOT extracting sales from Tally -- Shoper already
+provides that.
+
+New Python concepts, since you're reading this while learning:
+- Tally's API isn't SQL -- it's a request/response XML protocol.
+- `BILLALLOCATIONS.LIST` is Tally's mechanism for linking a payment or
+  credit-note entry back to the specific invoice it settles -- the
+  same idea as a foreign key, expressed inside Tally's XML.
+- Storing `self.division_prefixes` as a list of (prefix, division)
+  tuples, built once in __init__ from config, means the matching logic
+  in _identify_division never has to know or care how many prefixes
+  exist or what they are -- add a fifth division in config, and this
+  code needs zero changes.
+"""
+
+import datetime
+import re
+import xml.etree.ElementTree as ET
+
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+
+from shoper_adapter import get_financial_year_cutoff  # reuse the same FY-boundary math, not a copy
+
+
+def sanitize_xml(raw_bytes: bytes) -> str:
+    """Tally's XML responses sometimes contain control characters and
+    unbound namespace prefixes that a strict XML parser chokes on.
+    Cleans both before parsing -- proven approach against this Tally
+    install from earlier work in this project."""
+    try:
+        text = raw_bytes.decode('utf-8', errors='ignore')
+    except Exception:
+        text = raw_bytes.decode('latin-1', errors='ignore')
+    text = re.sub(r'&#x?(?:[0-8]|1[0-1]|1[4-9]|2[0-9]|3[0-1]);?', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', text)
+    text = re.sub(r'<(/)?([a-zA-Z0-9_]+):', r'<\1\2_', text)
+    text = re.sub(r'(\s[a-zA-Z0-9_]+):([a-zA-Z0-9_.-]+=)', r'\1_\2', text)
+    return text
+
+
+def format_tally_date(date_str) -> str:
+    """Formats any input date string into Tally's YYYYMMDD format, so
+    dates from different fields can be compared as plain strings."""
+    d_str = str(date_str).strip()
+    if len(d_str) == 8 and d_str.isdigit():
+        return d_str
+    for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d', '%d-%b-%Y'):
+        try:
+            dt = datetime.datetime.strptime(d_str, fmt)
+            return dt.strftime('%Y%m%d')
+        except ValueError:
+            continue
+    return d_str
+
+
+class TallyAdapter:
+    """Extracts canonical DataFrames from Tally via its local XML API."""
+
+    SOURCE_SYSTEM = "tally"  # stamped onto every row this adapter produces
+
+    def __init__(self, tally_url: str, years_back: int, division_prefixes: list, default_division: str):
+        self.tally_url = tally_url
+        self.cutoff = get_financial_year_cutoff(datetime.date.today(), years_back)
+        self.today = datetime.date.today()
+        # Config-driven now, not hardcoded -- a list of (prefix, division)
+        # tuples, checked in order. Adding a division, or a distributor
+        # with a different naming convention entirely, is a config
+        # change, not a code change.
+        self.division_prefixes = [(p["prefix"], p["division"]) for p in division_prefixes]
+        self.default_division = default_division
+
+    def _identify_division(self, vch_no: str, party_name: str = '', vch_type: str = '') -> str:
+        text = f'{vch_no} {party_name} {vch_type}'.upper()
+        for prefix, division in self.division_prefixes:
+            if prefix.upper() in text:
+                return division
+        return self.default_division
+
+    def extract_outstanding(self) -> pd.DataFrame:
+        """
+        Live Bills Receivable -- a current snapshot, not date-windowed.
+        Outstanding balances are as-of-today by nature; there's no
+        'range' to ask Tally for here.
+        """
+        xml_payload = """<ENVELOPE>
+            <HEADER>
+                <VERSION>1</VERSION>
+                <TALLYREQUEST>Export</TALLYREQUEST>
+                <TYPE>Data</TYPE>
+                <ID>Bills Receivable</ID>
+            </HEADER>
+            <BODY>
+                <DESC>
+                    <STATICVARIABLES>
+                        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+                    </STATICVARIABLES>
+                </DESC>
+            </BODY>
+        </ENVELOPE>"""
+
+        res = requests.post(self.tally_url, data=xml_payload, headers={'Content-Type': 'text/xml'}, timeout=120)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, 'html.parser')
+        bill_fixed_elements = soup.find_all(lambda t: t.name and t.name.lower() == 'billfixed')
+
+        rows = []
+        for fixed_elem in bill_fixed_elements:
+            party_elem = fixed_elem.find(lambda t: t.name and t.name.lower() == 'billparty')
+            date_elem = fixed_elem.find(lambda t: t.name and t.name.lower() == 'billdate')
+            ref_elem = fixed_elem.find(lambda t: t.name and t.name.lower() == 'billref')
+            amt_elem = fixed_elem.find_next(lambda t: t.name and t.name.lower() == 'billcl')
+
+            name_val = party_elem.get_text(strip=True) if party_elem else ""
+            if not name_val or name_val.lower() in ['ledger name', 'party name', 'name']:
+                continue
+            date_val = date_elem.get_text(strip=True) if date_elem else ""
+            ref_val = ref_elem.get_text(strip=True) if ref_elem else ""
+            amt_val = amt_elem.get_text(strip=True) if amt_elem else ""
+
+            if name_val and amt_val:
+                cleaned_amt = amt_val.replace(',', '').replace('Dr', '').replace('Cr', '').strip()
+                try:
+                    num_amt = abs(float(cleaned_amt))
+                    if num_amt > 0:
+                        rows.append({
+                            'customer_name': name_val,
+                            'invoice_date': date_val,
+                            'invoice_reference': ref_val,
+                            'pending_amount': num_amt,
+                            'division': self._identify_division(ref_val, name_val),
+                            'source_system': self.SOURCE_SYSTEM,
+                        })
+                except ValueError:
+                    pass
+        return pd.DataFrame(rows)
+
+    def _fetch_vouchers_in_range(self, from_date: datetime.date, to_date: datetime.date, include_postdated: bool = False) -> list:
+        """Shared helper: fetches ALL vouchers in a date range with full
+        ledger-entry detail (bill allocations, bank/instrument detail).
+        include_postdated maps to Tally's own SVINCLUDEPOSTDATED flag --
+        without it, Tally's default behavior may exclude future-dated
+        vouchers from the response entirely, not just fail to flag them.
+        Filtering by voucher type happens client-side in each specific
+        extract_* method."""
+        formatted_from = from_date.strftime('%Y%m%d')
+        formatted_to = to_date.strftime('%Y%m%d')
+        postdated_line = '<SVINCLUDEPOSTDATED TYPE="Logical">Yes</SVINCLUDEPOSTDATED>' if include_postdated else ''
+        fetch_fields = (
+            "DATE, VOUCHERNUMBER, VOUCHERTYPENAME, PARTYLEDGERNAME, "
+            "INSTRUMENTDATE, INSTRUMENTNUMBER, BANKALLOCATIONS.*, "
+            "ALLLEDGERENTRIES.*, LEDGERENTRIES.*"
+        )
+
+        req_xml = f"""<ENVELOPE>
+            <HEADER>
+                <VERSION>1</VERSION>
+                <TALLYREQUEST>Export</TALLYREQUEST>
+                <TYPE>Collection</TYPE>
+                <ID>VoucherColl</ID>
+            </HEADER>
+            <BODY>
+                <DESC>
+                    <STATICVARIABLES>
+                        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+                        <SVFROMDATE TYPE="Date">{formatted_from}</SVFROMDATE>
+                        <SVTODATE TYPE="Date">{formatted_to}</SVTODATE>
+                        {postdated_line}
+                    </STATICVARIABLES>
+                    <TDL>
+                        <TDLMESSAGE>
+                            <COLLECTION NAME="VoucherColl" ISINITIALISE="Yes">
+                                <TYPE>Voucher</TYPE>
+                                <FETCH>{fetch_fields}</FETCH>
+                            </COLLECTION>
+                        </TDLMESSAGE>
+                    </TDL>
+                </DESC>
+            </BODY>
+        </ENVELOPE>"""
+
+        res = requests.post(self.tally_url, data=req_xml, headers={'Content-Type': 'text/xml'}, timeout=180)
+        res.raise_for_status()
+        clean_xml = sanitize_xml(res.content)
+        root = ET.fromstring(clean_xml)
+        return root.findall('.//VOUCHER')
+
+    def _extract_bill_references(self, voucher) -> list:
+        """
+        Pulls bill-wise allocation references out of a voucher's ledger
+        entries -- answers "which invoice does this receipt/CN settle
+        against." Each BILLALLOCATIONS.LIST entry has a NAME (the bill
+        reference) and a BILLTYPE ('Agst Ref' = settling an existing
+        bill, which is the case we care about here).
+
+        Also captures WHICH ledger entry each bill allocation came from
+        (party_ledger_name) -- necessary because a single voucher can
+        settle bills across multiple different party ledgers at once
+        (confirmed in testing: one bank receipt split across three
+        related customer accounts). The voucher-level PARTYLEDGERNAME
+        field only ever captures one of them, so each bill reference
+        needs to be attributed to its own specific owning ledger, not
+        a single shared name for the whole voucher.
+        """
+        refs = []
+        ledgers = (
+            voucher.findall('.//ALLLEDGERENTRIES.LIST')
+            + voucher.findall('.//LEDGERENTRIES.LIST')
+        )
+        for ledger in ledgers:
+            ledger_name = ledger.findtext('LEDGERNAME', '').strip()
+            bill_allocations = ledger.findall('.//BILLALLOCATIONS.LIST')
+            for bill in bill_allocations:
+                bill_name = bill.findtext('NAME', '').strip()
+                bill_type = bill.findtext('BILLTYPE', '').strip()
+                bill_amount = bill.findtext('AMOUNT', '0')
+                if bill_name:
+                    try:
+                        amt = abs(float(bill_amount))
+                    except ValueError:
+                        amt = 0.0
+                    refs.append({
+                        'party_ledger_name': ledger_name,
+                        'bill_reference': bill_name,
+                        'bill_type': bill_type,
+                        'bill_amount': amt,
+                    })
+        return refs
+
+    def _extract_payment_details(self, voucher) -> dict:
+        """
+        Identifies the payment-side ledger entry (bank or cash) by what
+        it DOESN'T have, rather than Tally's ISPARTYLEDGER flag -- that
+        flag was tried first and confirmed (via real test output) to
+        mark EVERY ledger entry in some vouchers, bank included, as
+        "Yes", making it useless here as a distinguishing signal.
+
+        Instead: a customer/party ledger entry always carries a
+        BILLALLOCATIONS.LIST -- that's literally what bill-wise
+        tracking is, and it's the same mechanism that already correctly
+        identified party ledgers for customer_name above. The payment
+        side never has one. Among entries with no BILLALLOCATIONS.LIST:
+        if it has a BANKALLOCATIONS.LIST, that's a bank/cheque payment
+        with real instrument detail; if not, cash.
+        """
+        ledgers = voucher.findall('.//ALLLEDGERENTRIES.LIST') + voucher.findall('.//LEDGERENTRIES.LIST')
+
+        payment_ledger = None
+        for ledger in ledgers:
+            has_bill_allocations = ledger.find('.//BILLALLOCATIONS.LIST') is not None
+            if has_bill_allocations:
+                continue  # a party/customer ledger entry -- not the payment side
+            ledger_name = ledger.findtext('LEDGERNAME', '').strip()
+            if ledger_name:
+                payment_ledger = ledger
+                break
+
+        if payment_ledger is None:
+            return {'mode_of_payment': None, 'instrument': None, 'instrument_date': None, 'bank': None}
+
+#        ledger_name = payment_ledger.findtext('LEDGERNAME', '').strip()
+        bank_alloc = payment_ledger.find('.//BANKALLOCATIONS.LIST')
+        if bank_alloc is not None:
+            instrument_no = (
+                bank_alloc.findtext('INSTRUMENTNUMBER', '').strip()
+                or voucher.findtext('INSTRUMENTNUMBER', '').strip()
+            )
+            instrument_date_raw = (
+                bank_alloc.findtext('INSTRUMENTDATE', '').strip()
+                or voucher.findtext('INSTRUMENTDATE', '').strip()
+            )
+            bank_name = (
+	        bank_alloc.findtext('BANKNAME','').strip()
+            )
+            instrument_date = format_tally_date(instrument_date_raw) if instrument_date_raw else None
+            return {
+                'mode_of_payment': ledger_name,
+                'instrument': instrument_no or None,
+                'instrument_date': instrument_date,
+                'bank': bank_name,
+            }
+        else:
+            return {
+                'mode_of_payment': 'Cash',
+                'instrument': None,
+                'instrument_date': None,
+                'bank': None,
+            }
+
+    def extract_receipts(self) -> pd.DataFrame:
+        """
+        Receipt vouchers, one row per bill reference settled (a single
+        receipt can settle multiple invoices) -- now carrying full
+        payment detail (mode_of_payment, instrument, instrument_date,
+        bank) directly on each row.
+
+        Date range extends FORWARD to the end of the current financial
+        year, not just up to today -- necessary now that PDC detection
+        is just "instrument_date > today" applied to this same table.
+        A receipt dated in the future (a post-dated cheque) needs to
+        actually be IN this table for that filter to find it at all.
+        """
+        fy_start_year = self.today.year if self.today.month >= 4 else self.today.year - 1
+        fy_end = datetime.date(fy_start_year + 1, 3, 31)
+
+        vouchers = self._fetch_vouchers_in_range(self.cutoff, fy_end, include_postdated=True)
+        rows = []
+        for v in vouchers:
+            vch_type = v.findtext('VOUCHERTYPENAME', '').strip().upper()
+            if 'RECEIPT' not in vch_type:
+                continue
+
+            vch_no = v.findtext('VOUCHERNUMBER', '').strip()
+            party = v.findtext('PARTYLEDGERNAME', '').strip()
+            vch_date = v.findtext('DATE', '').strip()
+            division = self._identify_division(vch_no, party, vch_type)
+            payment = self._extract_payment_details(v)
+
+            bill_refs = self._extract_bill_references(v)
+            if not bill_refs:
+                rows.append({
+                    'receipt_date': vch_date, 'voucher_number': vch_no,
+                    'customer_name': party, 'bill_reference': None,
+                    'bill_type': None, 'amount': None,
+                    **payment,
+                    'division': division, 'source_system': self.SOURCE_SYSTEM,
+                })
+            else:
+                for ref in bill_refs:
+                    rows.append({
+                        'receipt_date': vch_date, 'voucher_number': vch_no,
+                        # Prefer the specific ledger this bill actually
+                        # belongs to (correct for multi-party vouchers);
+                        # fall back to the voucher-level party only if
+                        # that ledger name somehow came through empty.
+                        'customer_name': ref['party_ledger_name'] or party,
+                        'bill_reference': ref['bill_reference'],
+                        'bill_type': ref['bill_type'], 'amount': ref['bill_amount'],
+                        **payment,
+                        'division': division, 'source_system': self.SOURCE_SYSTEM,
+                    })
+        return pd.DataFrame(rows)
+
+    def extract_credit_notes(self) -> pd.DataFrame:
+        """Same shape and reasoning as extract_receipts, for Credit Note
+        vouchers -- one row per bill reference the CN settles against.
+        No payment-detail columns here; a CN isn't a money transfer, so
+        mode_of_payment/instrument/bank don't apply."""
+        vouchers = self._fetch_vouchers_in_range(self.cutoff, self.today)
+        rows = []
+        for v in vouchers:
+            vch_type = v.findtext('VOUCHERTYPENAME', '').strip().upper()
+            if 'CREDIT' not in vch_type and 'CN' not in vch_type:
+                continue
+
+            vch_no = v.findtext('VOUCHERNUMBER', '').strip()
+            party = v.findtext('PARTYLEDGERNAME', '').strip()
+            vch_date = v.findtext('DATE', '').strip()
+            division = self._identify_division(vch_no, party, vch_type)
+
+            bill_refs = self._extract_bill_references(v)
+            if not bill_refs:
+                rows.append({
+                    'cn_date': vch_date, 'voucher_number': vch_no,
+                    'customer_name': party, 'bill_reference': None,
+                    'bill_type': None, 'amount': None,
+                    'division': division, 'source_system': self.SOURCE_SYSTEM,
+                })
+            else:
+                for ref in bill_refs:
+                    rows.append({
+                        'cn_date': vch_date, 'voucher_number': vch_no,
+                        'customer_name': ref['party_ledger_name'] or party,
+                        'bill_reference': ref['bill_reference'],
+                        'bill_type': ref['bill_type'], 'amount': ref['bill_amount'],
+                        'division': division, 'source_system': self.SOURCE_SYSTEM,
+                    })
+        return pd.DataFrame(rows)
+
+
+if __name__ == "__main__":
+    from config_loader import load_config
+
+    config = load_config()
+    tally_cfg = config["tally"]
+    adapter = TallyAdapter(
+        tally_url=tally_cfg["url"],
+        years_back=tally_cfg["years_back"],
+        division_prefixes=tally_cfg["division_prefixes"],
+        default_division=tally_cfg["default_division"],
+    )
+
+    print("=== Outstanding ===")
+    outstanding_df = adapter.extract_outstanding()
+    print(outstanding_df.head())
+    print(f"Total rows: {len(outstanding_df)}\n")
+
+    print("=== Receipts (payment detail is UNVERIFIED -- check carefully) ===")
+    receipts_df = adapter.extract_receipts()
+    print(receipts_df.head(20))
+    print(receipts_df[receipts_df['voucher_number'] == '140'][['customer_name', 'bill_reference', 'amount', 'mode_of_payment', 'bank', 'instrument', 'instrument_date']])
+    print(f"Total rows: {len(receipts_df)}\n")
+
+    print("=== Credit Notes (UNVALIDATED -- check this carefully) ===")
+    cn_df = adapter.extract_credit_notes()
+    print(cn_df.head(20))
+    print(f"Total rows: {len(cn_df)}")

@@ -1,0 +1,211 @@
+"""
+load_to_postgres.py
+
+Runs ShoperAdapter's and TallyAdapter's extractions and loads them
+into the canonical Postgres (Neon) tables defined in canonical_schema.sql.
+
+MULTI-SOURCE SAFE: every load is scoped to (table, source_system) --
+never a blind, whole-table TRUNCATE. This is what lets a second source
+(a future Botree adapter, an Excel-based adapter for a division without
+a proper ERP, etc.) feed the SAME canonical table as Shoper/Tally
+without one source's load destroying another's data on its next run.
+sync_state is similarly keyed by (source_table, source_system), so two
+sources feeding the same table each get their own independent
+watermark instead of clobbering each other's sync progress.
+
+- customers, items: full refresh, scoped to this source's rows only
+  (DELETE WHERE source_system = X, then reload). Small master data,
+  changes slowly.
+- sales, purchases: incremental via a per-source watermark. Treated as
+  immutable once posted, so new rows are safe to just append.
+- sales_orders: full refresh, scoped to source -- a live snapshot of
+  "genuinely actionable pending orders" (see extract_sales_orders in
+  shoper_adapter.py), not history. An upsert-based approach was tried
+  and rejected: it can only add/update, never remove a row that's no
+  longer true (an order that got billed, or aged out of the lookback
+  window), which would leave stale pending_qty values sitting around
+  forever. Full refresh avoids that.
+- outstanding_debtors: full refresh, same reasoning as sales_orders --
+  a live snapshot, not history.
+- receipts, credit_notes: full refresh FOR NOW, even though
+  conceptually they're immutable-once-posted like sales/purchases.
+  TallyAdapter's extract_receipts/extract_credit_notes don't accept a
+  since_date yet -- that's a known follow-up, not an oversight. Full
+  refresh is still CORRECT, just re-pulls the whole FY window every
+  run instead of only what's new.
+
+KNOWN DEFERRED PROBLEM: if two sources ever describe "the same"
+customer under different ID schemes, this does NOT unify them -- they
+sit as separate rows tagged by source_system. Real cross-system
+identity matching needs a real second source to design against, not a
+guess made now.
+"""
+
+import datetime
+
+import psycopg2
+import pandas as pd
+from sqlalchemy import create_engine, text
+
+from config_loader import load_config
+from shoper_adapter import ShoperAdapter, DivisionConfig
+from tally_adapter import TallyAdapter
+
+
+def get_engine(connection_string: str):
+    return create_engine(connection_string)
+
+
+def apply_schema(engine, schema_file: str = "canonical_schema.sql"):
+    """Runs canonical_schema.sql against the database -- safe to run
+    every time, since every CREATE TABLE uses IF NOT EXISTS."""
+    with open(schema_file, "r") as f:
+        schema_sql = f.read()
+    with engine.begin() as conn:
+        for statement in schema_sql.split(";"):
+            statement = statement.strip()
+            # Filter out empty statements and blocks containing only SQL comments
+            clean_lines = [
+                line for line in statement.splitlines()
+                if line.strip() and not line.strip().startswith("--")
+            ]
+            if clean_lines:
+                conn.execute(text(statement))
+
+def get_last_synced(engine, source_table: str, source_system: str):
+    """Returns the last_synced_at timestamp for this (table, source)
+    pair, or None if never synced -- None means "do a full backfill."
+    Keyed by BOTH table and source, not just table, so two different
+    sources feeding the same table each track their own progress."""
+    with engine.begin() as conn:
+        result = conn.execute(
+            text("SELECT last_synced_at FROM sync_state WHERE source_table = :t AND source_system = :s"),
+            {"t": source_table, "s": source_system},
+        ).fetchone()
+    return result[0] if result else None
+
+
+def set_last_synced(engine, source_table: str, source_system: str, when: datetime.datetime):
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO sync_state (source_table, source_system, last_synced_at)
+                VALUES (:t, :s, :w)
+                ON CONFLICT (source_table, source_system) DO UPDATE SET last_synced_at = :w
+            """),
+            {"t": source_table, "s": source_system, "w": when},
+        )
+
+
+def full_reload_table(engine, df: pd.DataFrame, table_name: str, source_system: str):
+    """
+    Reloads ONLY this source's rows -- DELETE scoped to source_system,
+    never a table-wide TRUNCATE. This is the core fix: a second source
+    feeding this same table can run its own load without this one
+    destroying its data, and vice versa.
+    """
+    with engine.begin() as conn:
+        conn.execute(text(f"DELETE FROM {table_name} WHERE source_system = :s"), {"s": source_system})
+        df.to_sql(table_name, conn, if_exists="append", index=False)
+    print(f"Full reload ({source_system}): {len(df)} rows into {table_name}")
+
+
+def append_new_rows(engine, df: pd.DataFrame, table_name: str):
+    """Adds rows without touching what's already there. Already safe
+    for multi-source by construction -- a pure append never removes or
+    overwrites another source's rows, regardless of tagging."""
+    if df.empty:
+        print(f"No new rows for {table_name}")
+        return
+    with engine.begin() as conn:
+        df.to_sql(table_name, conn, if_exists="append", index=False)
+    print(f"Appended {len(df)} new rows into {table_name}")
+
+
+def sync_append_only_table(engine, adapter_method, table_name: str, source_system: str):
+    """
+    Shared logic for sales/purchases (and eventually receipts/credit
+    notes, once they support since_date) -- immutable-once-posted
+    sources use "watermark, then append." First-ever load still routes
+    through full_reload_table (scoped delete-then-insert) rather than a
+    raw append, in case a stale partial load from an earlier failed run
+    is sitting there for this exact source.
+    """
+    last_synced = get_last_synced(engine, table_name, source_system)
+    if last_synced is None:
+        print(f"No previous sync for {table_name} ({source_system}) -- running full backfill.")
+        df = adapter_method()
+        full_reload_table(engine, df, table_name, source_system)
+    else:
+        since = last_synced.date()
+        print(f"Incremental sync for {table_name} ({source_system}) since {since}...")
+        df = adapter_method(since_date=since)
+        append_new_rows(engine, df, table_name)
+    set_last_synced(engine, table_name, source_system, datetime.datetime.now())
+
+
+def run_load():
+    config = load_config()
+    sql_cfg = config["sql_server"]
+    pg_connection_string = config["postgres"]["connection_string"]
+
+    divisions = [
+        DivisionConfig(
+            division_name=division["name"],
+            server=sql_cfg["host"],
+            database=division["staging_db"],
+            username=sql_cfg["sa_username"],
+            password=sql_cfg["sa_password"],
+        )
+        for division in config["divisions"]
+    ]
+    shoper = ShoperAdapter(
+        divisions,
+        financial_years_back=config["sync"]["financial_years_back"],
+        sales_orders_lookback_days=config["sync"]["sales_orders_lookback_days"],
+    )
+    tally_cfg = config["tally"]
+    tally = TallyAdapter(
+        tally_url=tally_cfg["url"],
+        years_back=tally_cfg["years_back"],
+        division_prefixes=tally_cfg["division_prefixes"],
+        default_division=tally_cfg["default_division"],
+    )
+    engine = get_engine(pg_connection_string)
+
+    print("Applying schema (safe to run every time)...")
+    apply_schema(engine)
+
+    print("\n=== Shoper ===")
+
+    print("\n--- Customers (full refresh, scoped to shoper) ---")
+    full_reload_table(engine, shoper.extract_customers(), "customers", shoper.SOURCE_SYSTEM)
+
+    print("\n--- Items (full refresh, scoped to shoper) ---")
+    full_reload_table(engine, shoper.extract_items(), "items", shoper.SOURCE_SYSTEM)
+
+    print("\n--- Sales (incremental) ---")
+    sync_append_only_table(engine, shoper.extract_sales, "sales", shoper.SOURCE_SYSTEM)
+
+    print("\n--- Purchases (incremental) ---")
+    sync_append_only_table(engine, shoper.extract_purchases, "purchases", shoper.SOURCE_SYSTEM)
+
+    print("\n--- Sales Orders (full refresh, currently-actionable snapshot) ---")
+    full_reload_table(engine, shoper.extract_sales_orders(), "sales_orders", shoper.SOURCE_SYSTEM)
+
+    print("\n=== Tally ===")
+
+    print("\n--- Outstanding (full refresh, live snapshot) ---")
+    full_reload_table(engine, tally.extract_outstanding(), "outstanding_debtors", tally.SOURCE_SYSTEM)
+
+    print("\n--- Receipts (full refresh for now -- since_date not yet supported) ---")
+    full_reload_table(engine, tally.extract_receipts(), "receipts", tally.SOURCE_SYSTEM)
+
+    print("\n--- Credit Notes (full refresh for now -- since_date not yet supported) ---")
+    full_reload_table(engine, tally.extract_credit_notes(), "credit_notes", tally.SOURCE_SYSTEM)
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    run_load()

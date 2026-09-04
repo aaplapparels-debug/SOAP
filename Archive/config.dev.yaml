@@ -1,0 +1,72 @@
+# config.dev.yaml
+# Settings for THIS specific machine (your current dev PC with Tally,
+# no Shoper installed). Production will have its own config.prod.yaml
+# with different paths -- the code never changes, only this file does.
+
+tenant: AAPL
+
+backup:
+  # Where Shoper drops its nightly backup zip. Fill in your real path.
+  watch_folder: "E:\\SOAP\\Backup"
+  # Scratch space for extracting the zip before restore. Cleared after
+  # every successful run -- nothing should be left sitting here.
+  temp_extract_folder: "E:\\SOAP\\Temp"
+
+sql_server:
+  # Native install now, not Docker -- backslash before the instance
+  # name, single-quoted so YAML doesn't try to interpret the backslash
+  # as an escape sequence (same gotcha we hit with Windows paths earlier).
+  host: 'localhost\STAGING_SERVER'
+  sa_username: "sa"
+  # Never put the real password here -- read from environment variable.
+  # SQL Server's own default data folder for this instance -- find it
+  # via SSMS: right-click server > Properties > Database Settings tab.
+  # Used as a safe landing spot for backup files before restoring,
+  # since the SQL Server service account is guaranteed to have access
+  # to its own folder (not necessarily to just any folder on the PC).
+  data_dir: 'E:\Microsoft SQL Server\MSSQL14.STAGING_SERVER\MSSQL\DATA'
+  log_dir: 'E:\Microsoft SQL Server\MSSQL14.STAGING_SERVER\MSSQL\Log'
+
+sync:
+  # How many COMPLETE financial years back to pull on the first-ever
+  # load, anchored to April 1 (Indian FY boundary) -- not a rolling
+  # N-years-from-today window. 3 means: 3 complete prior FYs plus
+  # however much of the current FY has elapsed. E.g. as of Aug 2026
+  # (inside FY26-27), this pulls from April 1, 2023 onward -- covering
+  # FY23-24, FY24-25, FY25-26, and the current FY26-27 so far.
+  financial_years_back: 3
+
+google_drive:
+  # OAuth Desktop app credentials (NOT a service account key -- Google
+  # blocks service accounts from writing to personal Drive storage).
+  # First run opens a browser for a one-time login; after that,
+  # token.json (auto-created) is reused silently.
+  client_secret_file: "drive_client_secret.json"
+  token_file: "token.json"
+  # The ID from the Drive folder's URL, e.g. for
+  # https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp
+  # the ID is "1AbCdEfGhIjKlMnOp" -- just that part, not the full URL.
+  shared_folder_id: "1OEVDbQ7Yx7m30jXRBXv7cliwGEWKXbAL"
+
+postgres:
+  # Paste the connection string Neon showed you at project creation.
+  # Never commit this to a public repo -- it contains the password.
+  connection_string: "postgresql://neondb_owner:npg_NnyReW8UMY1V@ep-broad-cloud-azm7e43p.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
+
+divisions:
+  # Shoper drops one zip per division; each pattern matches tonight's
+  # file by its division code, with a wildcard for date/time/suffix.
+  # Confirmed from the actual folder listing: the zip's code drops the
+  # leading "9" from the database name (Shoper962X -> zip code "62X").
+  - name: SPM
+    backup_file_pattern: "A_62X_*.ZIP"
+    staging_db: ShoperStaging_SPM
+  - name: SPW
+    backup_file_pattern: "A_1Y8_*.ZIP"
+    staging_db: ShoperStaging_SPW
+  - name: Thermal
+    backup_file_pattern: "A_1Y9_*.ZIP"
+    staging_db: ShoperStaging_Thermal
+  - name: KTH
+    backup_file_pattern: "A_9N7_*.ZIP"
+    staging_db: ShoperStaging_KTH

@@ -1,0 +1,71 @@
+[2026-08-26 16:29:20] [INFO] 🚀 Pipeline Daemon Initialized. Running in background mode.
+[2026-08-26 16:29:20] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 16:29:20] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 16:29:20] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 16:29:20] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 16:39:20] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 16:39:20] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 16:39:20] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 16:39:20] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 16:49:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 16:49:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 16:49:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 16:49:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 16:59:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 16:59:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 16:59:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 16:59:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 17:09:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 17:09:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 17:09:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 17:09:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 17:19:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 17:19:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 17:19:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 17:19:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 17:29:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 17:29:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 17:29:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 17:29:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 17:39:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 17:39:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 17:39:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 17:39:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 17:49:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 17:49:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 17:49:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 17:49:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 17:59:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 17:59:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 17:59:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 17:59:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 18:09:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 18:09:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 18:09:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 18:09:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 18:19:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 18:19:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 18:19:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 18:19:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 18:29:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 18:29:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 18:29:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 18:29:21] [INFO] ================== PIPELINE CYCLE END ====================
+
+[2026-08-26 18:39:21] [INFO] Active window detected. Triggering sync cycle...
+[2026-08-26 18:39:21] [INFO] ================== PIPELINE CYCLE START ==================
+[2026-08-26 18:39:21] [ERROR] Script not found: E:\SOAP\Src\load_to_postgres.py
+[2026-08-26 18:39:21] [INFO] ================== PIPELINE CYCLE END ====================
+

@@ -1,0 +1,9 @@
+COLUMN_NAME                                                                                                                     
+--------------------------------------------------------------------------------------------------------------------------------
+OrderNo                                                                                                                         
+OrderDate                                                                                                                       
+OrderRemarks                                                                                                                    
+Orderqty                                                                                                                        
+OrderStatus                                                                                                                     
+
+(5 rows affected)

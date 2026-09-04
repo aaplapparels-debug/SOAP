@@ -1,0 +1,122 @@
+# config.dev.yaml
+# Settings for THIS specific machine (your current dev PC with Tally,
+# no Shoper installed). Production will have its own config.prod.yaml
+# with different paths -- the code never changes, only this file does.
+
+tenant: AAPL
+
+backup:
+  # Where Shoper drops its nightly backup zip. Fill in your real path.
+  watch_folder: "E:\\ShoperBackups"
+  # Scratch space for extracting the zip before restore. Cleared after
+  # every successful run -- nothing should be left sitting here.
+  temp_extract_folder: "E:\\ShoperTemp"
+
+sql_server:
+  # Native install now, not Docker -- backslash before the instance
+  # name, single-quoted so YAML doesn't try to interpret the backslash
+  # as an escape sequence (same gotcha we hit with Windows paths earlier).
+  host: 'localhost\STAGING_SERVER'
+  sa_username: "sa"
+  # Never put the real password here -- read from environment variable.
+  # SQL Server's own default data folder for this instance -- find it
+  # via SSMS: right-click server > Properties > Database Settings tab.
+  # Used as a safe landing spot for backup files before restoring,
+  # since the SQL Server service account is guaranteed to have access
+  # to its own folder (not necessarily to just any folder on the PC).
+  data_dir: 'E:\Microsoft SQL Server\MSSQL14.STAGING_SERVER\MSSQL\DATA'
+  log_dir: 'E:\Microsoft SQL Server\MSSQL14.STAGING_SERVER\MSSQL\Log'
+
+sync:
+  # How many COMPLETE financial years back to pull on the first-ever
+  # load of sales/purchases, anchored to April 1 (Indian FY boundary) --
+  # not a rolling N-years-from-today window. See shoper_adapter.py for
+  # the exact math.
+  financial_years_back: 3
+
+  # Sales orders: only genuinely-actionable pending orders matter --
+  # placed recently AND still pending. An order that's been unbilled
+  # for months isn't something anyone's going to chase; the customer
+  # places a fresh order instead of digging up an old one. This bounds
+  # "recent" to this many days.
+  sales_orders_lookback_days: 10
+
+google_drive:
+  # OAuth Desktop app credentials (NOT a service account key -- Google
+  # blocks service accounts from writing to personal Drive storage).
+  # First run opens a browser for a one-time login; after that,
+  # token.json (auto-created) is reused silently.
+  client_secret_file: "drive_client_secret.json"
+  token_file: "token.json"
+  # The ID from the Drive folder's URL, e.g. for
+  # https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp
+  # the ID is "1AbCdEfGhIjKlMnOp" -- just that part, not the full URL.
+  shared_folder_id: "1OEVDbQ7Yx7m30jXRBXv7cliwGEWKXbAL"
+
+postgres:
+  # Paste the connection string Neon showed you at project creation.
+  # Never commit this to a public repo -- it contains the password.
+  connection_string: "PASTE_YOUR_NEON_CONNECTION_STRING_HERE"
+
+tally:
+  # Tally's local XML/HTTP API -- only reachable from the machine
+  # Tally itself is running on.
+  url: "http://localhost:9000"
+
+  # Separate from sync.financial_years_back (used for Shoper) --
+  # Tally's XML export is heavier per record, and a multi-year pull
+  # timed out in testing. 0 means "current financial year only."
+  years_back: 0
+
+  # Same SCRS/SWCRS/THCRS/KTHCRS convention as Shoper's own document
+  # numbering -- but Tally needs it explicit, since (unlike Shoper) all
+  # divisions share ONE Tally company, distinguished only by voucher
+  # number prefix rather than a separate database per division.
+  division_prefixes:
+    - prefix: "KTHCRS"
+      division: "KTH"
+    - prefix: "SWCRS"
+      division: "SPW"
+    - prefix: "SCRS"
+      division: "SPM"
+    - prefix: "THCRS"
+      division: "THM"
+    - prefix: "SPW"
+      division: "SPW"
+    - prefix: "SPM"
+      division: "SPM"
+    - prefix: "THM"
+      division: "THM"
+    - prefix: "KTH"
+      division: "KTH"
+  default_division: "SPM"
+
+dashboard:
+  # A DIFFERENT OAuth client than the Drive relay's -- that one is a
+  # "Desktop app" client (one person, local automation). This needs a
+  # "Web application" client instead, for multiple staff logging in
+  # through a browser. Create this as its own Client ID in the same
+  # Google Cloud project.
+  oauth_client_secret_file: "dashboard_client_secret.json"
+  # Must exactly match an Authorized redirect URI configured on that
+  # OAuth client. For local testing: http://localhost:8501
+  # For a deployed app, use its real public URL instead.
+  redirect_uri: "http://localhost:8501"
+
+divisions:
+  # Shoper drops one zip per division; each pattern matches tonight's
+  # file by its division code, with a wildcard for date/time/suffix.
+  # Confirmed from the actual folder listing: the zip's code drops the
+  # leading "9" from the database name (Shoper962X -> zip code "62X").
+  - name: SPM
+    backup_file_pattern: "A_62X_*.ZIP"
+    staging_db: ShoperStaging_SPM
+  - name: SPW
+    backup_file_pattern: "A_1Y8_*.ZIP"
+    staging_db: ShoperStaging_SPW
+  - name: Thermal
+    backup_file_pattern: "A_1Y9_*.ZIP"
+    staging_db: ShoperStaging_Thermal
+  - name: KTH
+    backup_file_pattern: "A_9N7_*.ZIP"
+    staging_db: ShoperStaging_KTH

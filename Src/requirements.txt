@@ -1,0 +1,26 @@
+# Core data handling
+pandas
+PyYAML
+
+# SQL Server access (Shoper side)
+pyodbc
+
+# Postgres access (canonical schema / Neon)
+psycopg2-binary
+SQLAlchemy
+
+# Tally XML parsing
+beautifulsoup4
+requests
+
+# Google Drive relay auth (drive_auth.py) + Dashboard OAuth login (dashboard.py)
+google-auth
+google-auth-oauthlib
+google-api-python-client
+
+# Dashboard
+streamlit
+
+# Standard library modules used throughout (base64, datetime, glob, hashlib,
+# io, os, re, secrets, shutil, subprocess, xml.etree.ElementTree, zipfile,
+# dataclasses, typing) need no entry here -- they ship with Python itself.

@@ -1,0 +1,24 @@
+docker exec -it shoper-staging /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "Sairam1@3" -C
+
+
+docker stop shoper-staging
+docker rm shoper-staging
+docker volume rm shoper_data
+docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=Sairam1@3" -p 14330:1433 --name shoper-staging -v shoper_data:/var/opt/mssql -d mcr.microsoft.com/mssql/server:2022-latest
+
+docker logs shoper-staging
+
+
+docker exec -it shoper-staging /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "Sairam1@3" -C -Q "RESTORE FILELISTONLY FROM DISK = '/var/opt/mssql/data/ShoperStaging_SPM.bak'"
+
+docker exec -it shoper-staging /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "Sairam1@3" -C
+
+docker exec -it shoper-staging /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "Sairam1@3" -C -Q "RESTORE DATABASE ShoperStaging_SPM FROM DISK = '/var/opt/mssql/data/ShoperStaging_SPM.bak' WITH MOVE 'Shoper962X_dat' TO '/var/opt/mssql/data/Shoper962X.mdf', MOVE 'Shoper962X_log' TO '/var/opt/mssql/data/Shoper962X.ldf',REPLACE, RECOVERY"
+
+
+$env:SHOPER_SA_PASSWORD = "Sairam1@3"
+
+docker exec -it shoper-staging /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "Sairam1@3" -C -Q "SELECT percent_complete, command FROM sys.dm_exec_requests WHERE command LIKE 'RESTORE%'"
+
+
+docker cp "E:\SOAP\Backup\A_62X_260818_1402_C\Shoper962X" shoper-staging:/var/opt/mssql/data/ShoperStaging_SPM.bak
