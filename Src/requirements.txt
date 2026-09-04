@@ -20,6 +20,7 @@ google-api-python-client
 
 # Dashboard
 streamlit
+plotly.express
 
 # Standard library modules used throughout (base64, datetime, glob, hashlib,
 # io, os, re, secrets, shutil, subprocess, xml.etree.ElementTree, zipfile,
