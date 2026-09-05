@@ -52,7 +52,7 @@ def get_oauth_flow():
 
     # Fallback to local client_secret.json file for local development
     secret_file = dashboard_cfg.get(
-        "oauth_client_secret_file", "client_secret.json"
+        "oauth_client_secret_file", "dashboard_client_secret.json"
     )
     return Flow.from_client_secrets_file(
         secret_file, scopes=scopes, redirect_uri="http://localhost:8501"
