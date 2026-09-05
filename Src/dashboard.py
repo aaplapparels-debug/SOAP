@@ -30,11 +30,32 @@ dashboard_cfg = config.get("dashboard", {})
 SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
 
-def get_oauth_flow() -> Flow:
+def get_oauth_flow():
+    scopes = [
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+    ]
+
+    # Check if OAuth configuration is passed directly as a dictionary in secrets
+    if "oauth" in dashboard_cfg:
+        client_config = (
+            dashboard_cfg["oauth"].to_dict()
+            if hasattr(dashboard_cfg["oauth"], "to_dict")
+            else dict(dashboard_cfg["oauth"])
+        )
+        return Flow.from_client_config(
+            client_config,
+            scopes=scopes,
+            redirect_uri="https://aapl-soap.streamlit.app",  # Your production Streamlit URL
+        )
+
+    # Fallback to local client_secret.json file for local development
+    secret_file = dashboard_cfg.get(
+        "oauth_client_secret_file", "client_secret.json"
+    )
     return Flow.from_client_secrets_file(
-        dashboard_cfg["oauth_client_secret_file"],
-        scopes=SCOPES,
-        redirect_uri=dashboard_cfg["redirect_uri"],
+        secret_file, scopes=scopes, redirect_uri="http://localhost:8501"
     )
 
 
