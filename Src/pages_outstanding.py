@@ -224,7 +224,7 @@ def show_outstanding_report():
                 m_row1_col1, m_row1_col2 = st.columns(2)
                 with m_row1_col1:
                     st.metric("Total Outstanding", format_inr(total_outstanding))
-                    st.caption(f"Includes ₹{pdc_total:,.0f} in post-dated cheques (PDCs) received.")
+                    st.caption(f"And ₹{pdc_total:,.0f} in post-dated cheques (PDCs) received.")
                     st.metric("Number of Customers", f"{df['customer_name'].nunique():,}")
                 with m_row1_col2:
                     st.metric("Number of Invoices", f"{len(df):,}")
