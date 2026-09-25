@@ -175,7 +175,7 @@ def show_sales_360():
           (s.sale_date BETWEEN :curr_start AND :curr_end) OR 
           (s.sale_date BETWEEN :ly_start AND :ly_end)
       )
-      AND (:cust_code IS NULL OR s.customer_code = :cust_code)
+      AND (CAST(:cust_code AS VARCHAR) IS NULL OR s.customer_code = CAST(:cust_code AS VARCHAR))
     GROUP BY s.item_code, COALESCE(i.item_desc, s.item_code), i.category_1
     """
 
