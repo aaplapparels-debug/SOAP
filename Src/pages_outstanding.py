@@ -139,7 +139,7 @@ def show_outstanding_report():
     FROM sales
     WHERE customer_code <> '1001'
       AND item_code <> '8901326926543'
-      AND (:cust_code IS NULL OR customer_code = :cust_code)
+      AND (CAST(:cust_code AS VARCHAR) IS NULL OR customer_code = CAST(:cust_code AS VARCHAR))
       AND sale_date BETWEEN :fy_start_date AND CURRENT_DATE
     """
 
