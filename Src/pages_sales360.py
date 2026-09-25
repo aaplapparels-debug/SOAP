@@ -192,7 +192,7 @@ def show_sales_360():
         ON o.item_code = i.item_code AND o.division = i.division AND i.source_system = 'shoper'
     WHERE o.source_system = 'shoper'
       AND o.order_date BETWEEN :curr_start AND :curr_end
-      AND (:cust_code IS NULL OR o.customer_code = :cust_code)
+      AND (CAST(:cust_code AS VARCHAR) IS NULL OR o.customer_code = CAST(:cust_code AS VARCHAR))
       AND o.item_code <> '8901326926543'
     GROUP BY o.item_code, COALESCE(i.item_desc, o.item_code)
     """
@@ -201,15 +201,15 @@ def show_sales_360():
     receipts_query = """
     SELECT COALESCE(SUM(amount), 0) AS total_receipts
     FROM receipts
-    WHERE (:full_name IS NULL OR customer_name = :full_name)
+    WHERE (CAST(:full_name AS VARCHAR) IS NULL OR customer_name = CAST(:full_name AS VARCHAR))
     AND((receipt_date BETWEEN :curr_start AND CURRENT_DATE AND mode_of_payment = 'Cash') 
-    OR (instrument_date IS NOT NULL AND TO_DATE(instrument_date, 'YYYYMMDD') <= CURRENT_DATE and TO_DATE(instrument_date, 'YYYYMMDD') >= :curr_start))  
+    OR (instrument_date IS NOT NULL AND TO_DATE(instrument_date, 'YYYYMMDD') <= CURRENT_DATE and TO_DATE(instrument_date, 'YYYYMMDD') >= CAST(:curr_start AS DATE)))  
     """
 
     pdc_query = """
     SELECT COALESCE(SUM(amount), 0) AS total_pdc
     FROM receipts
-    WHERE (:full_name IS NULL OR customer_name = :full_name)
+    WHERE (CAST(:full_name AS VARCHAR) IS NULL OR customer_name = CAST(:full_name AS VARCHAR))
     AND instrument_date IS NOT NULL
     AND TO_DATE(instrument_date, 'YYYYMMDD') > CURRENT_DATE
     """
@@ -223,7 +223,7 @@ def show_sales_360():
         pending_amount,
         (CURRENT_DATE - invoice_date) AS days_outstanding
     FROM outstanding_debtors
-    WHERE (:full_name IS NULL OR customer_name = :full_name)
+    WHERE (CAST(:full_name AS VARCHAR) IS NULL OR customer_name = CAST(:full_name AS VARCHAR))
     """
     clean_code = cust_code.strip() if cust_code else None
     clean_name = cust_name.strip() if cust_name else None
