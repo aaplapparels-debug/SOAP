@@ -7,7 +7,7 @@ pyodbc
 
 # Postgres access (canonical schema / Neon)
 psycopg2-binary
-psycopg
+psycopg[binary]
 SQLAlchemy
 
 # Tally XML parsing
