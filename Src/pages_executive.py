@@ -1,10 +1,11 @@
 """Executive Dashboard - High Level Overview"""
 
-import streamlit as st
+from config_loader import load_config
 import pandas as pd
 import plotly.graph_objects as go
 from sqlalchemy import create_engine, text
-from config_loader import load_config
+import streamlit as st
+
 
 @st.cache_resource
 def get_engine():
@@ -12,21 +13,117 @@ def get_engine():
     return create_engine(config["postgres"]["connection_string"])
 
 
+def format_inr(val):
+    """Format numeric values into standard Indian numbering (Cr, L, or K)."""
+    if val is None:
+        return "₹0"
+    abs_val = abs(val)
+    sign = "-" if val < 0 else ""
+    if abs_val >= 10000000:
+        return f"{sign}₹{abs_val / 10000000:.2f} Cr"
+    elif abs_val >= 100000:
+        return f"{sign}₹{abs_val / 100000:.2f} L"
+    elif abs_val >= 1000:
+        return f"{sign}₹{abs_val / 1000:.1f} K"
+    else:
+        return f"{sign}₹{abs_val:,.0f}"
+
+
 def show_executive_dashboard():
     st.title("👔 Executive Dashboard")
-    
+
     engine = get_engine()
-    
+
+    # ---------------------------------------------------------
+    # 0. Executive Control Parameters (Expander / Sidebar)
+    # ---------------------------------------------------------
+    with st.expander(
+        "⚙️ Executive Parameters & Operational Expenses", expanded=False
+    ):
+        ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns(4)
+        with ctrl_col1:
+            period_days = st.selectbox(
+                "Sales & Performance Window",
+                options=[30, 60, 90, 180, 365],
+                index=0,
+                format_func=lambda x: f"Last {x} Days",
+            )
+        with ctrl_col2:
+            fixed_expenses = st.number_input(
+                "Fixed Overheads (Rent, Admin, Payroll)",
+                min_value=0.0,
+                value=350000.0,
+                step=25000.0,
+                format="%.0f",
+            )
+        with ctrl_col3:
+            variable_expenses = st.number_input(
+                "Variable Overheads (Logistics, Promo)",
+                min_value=0.0,
+                value=150000.0,
+                step=10000.0,
+                format="%.0f",
+            )
+        with ctrl_col4:
+            target_roi = st.number_input(
+                "Target RoI %",
+                min_value=1.0,
+                max_value=100.0,
+                value=18.0,
+                step=1.0,
+            )
+
     try:
-        # 1. Outstanding Debtors (Tally data - investments in receivables)
+        # Inspect available columns in items and sales to handle cost and sign multipliers safely
+        with engine.begin() as conn:
+            item_cols_df = pd.read_sql(
+                text(
+                    "SELECT column_name FROM information_schema.columns WHERE"
+                    " table_name = 'items'"
+                ),
+                conn,
+            )
+            item_cols = set(item_cols_df["column_name"].str.lower().tolist())
+
+            sales_cols_df = pd.read_sql(
+                text(
+                    "SELECT column_name FROM information_schema.columns WHERE"
+                    " table_name = 'sales'"
+                ),
+                conn,
+            )
+            sales_cols = set(sales_cols_df["column_name"].str.lower().tolist())
+
+        # Determine cost expression for item-level purchase cost
+        if "purchase_rate" in item_cols:
+            cost_expr = "COALESCE(i.purchase_rate, 0)"
+        elif "pur_rate" in item_cols:
+            cost_expr = "COALESCE(i.pur_rate, 0)"
+        elif "cost_rate" in item_cols:
+            cost_expr = "COALESCE(i.cost_rate, 0)"
+        elif "cost_price" in item_cols:
+            cost_expr = "COALESCE(i.cost_price, 0)"
+        elif "stock_value" in item_cols and "stock_qty" in item_cols:
+            cost_expr = "CASE WHEN i.stock_qty > 0 THEN (i.stock_value / i.stock_qty) ELSE 0 END"
+        else:
+            cost_expr = "0"
+
+        sign_mult_expr = (
+            "s.sign_multiplier" if "sign_multiplier" in sales_cols else "1"
+        )
+
+        # ---------------------------------------------------------
+        # 1. Database Queries
+        # ---------------------------------------------------------
+        # 1. Outstanding Debtors (Tally)
         outstanding_query = """
         SELECT 
             SUM(pending_amount) as total_outstanding,
             COUNT(DISTINCT customer_name) as customer_count
         FROM outstanding_debtors
         """
-        
-        # 2. Stock Value (from items table - Shoper inventory)
+
+        # 2. Stock Value (Shoper inventory)
         stock_query = """
         SELECT 
             SUM(stock_value) as total_stock_value,
@@ -34,8 +131,8 @@ def show_executive_dashboard():
         FROM items
         WHERE source_system = 'shoper'
         """
-        
-        # 3. PDCs (Post-Dated Cheques) - from receipts table (Tally)
+
+        # 3. PDCs (Post-Dated Cheques from Tally receipts)
         pdc_query = """
         SELECT 
             COUNT(*) as pdc_count,
@@ -45,124 +142,299 @@ def show_executive_dashboard():
         WHERE instrument_date IS NOT NULL
             AND CAST(instrument_date AS DATE) > CURRENT_DATE
         """
-        
-        # 4. Recent Sales (Shoper sales)
-        sales_query = """
+
+        # 4. Item-Level Sales & Purchase Cost for Gross Profit
+        sales_perf_query = f"""
         SELECT 
-            SUM(net_value) as total_sales,
-            COUNT(DISTINCT customer_code) as unique_customers,
-            MAX(sale_date) as last_sale_date
-        FROM sales
-        WHERE source_system = 'shoper'
-            AND sale_date >= CURRENT_DATE - INTERVAL '30 days'
+            COALESCE(SUM(s.net_value * {sign_mult_expr}), 0) as gross_sales,
+            COALESCE(SUM(s.qty * {sign_mult_expr} * {cost_expr}), 0) as gross_purchases,
+            COUNT(DISTINCT s.customer_code) as unique_customers,
+            MAX(s.sale_date) as last_sale_date
+        FROM sales s
+        LEFT JOIN items i 
+            ON s.item_code = i.item_code 
+            AND s.division = i.division 
+            AND i.source_system = 'shoper'
+        WHERE s.source_system = 'shoper'
+            AND s.sale_date >= CURRENT_DATE - INTERVAL '{period_days} days'
         """
-        
+
         with engine.begin() as conn:
             outstanding = pd.read_sql(text(outstanding_query), conn)
             stock = pd.read_sql(text(stock_query), conn)
             pdc = pd.read_sql(text(pdc_query), conn)
-            sales = pd.read_sql(text(sales_query), conn)
-        
-        # Extract values safely
-        outstanding_val = outstanding.iloc[0]['total_outstanding'] if not outstanding.empty else 0
-        outstanding_val = outstanding_val or 0
-        outstanding_customers = outstanding.iloc[0]['customer_count'] if not outstanding.empty else 0
-        outstanding_customers = outstanding_customers or 0
-        
-        stock_value = stock.iloc[0]['total_stock_value'] if not stock.empty else 0
-        stock_value = stock_value or 0
-        stock_qty = stock.iloc[0]['total_qty'] if not stock.empty else 0
-        stock_qty = stock_qty or 0
-        
-        pdc_count = pdc.iloc[0]['pdc_count'] if not pdc.empty else 0
-        pdc_count = pdc_count or 0
-        pdc_amount = pdc.iloc[0]['pdc_amount'] if not pdc.empty else 0
-        pdc_amount = pdc_amount or 0
-        pdc_date = pdc.iloc[0]['earliest_pdc_date'] if not pdc.empty else None
-        
-        sales_30d = sales.iloc[0]['total_sales'] if not sales.empty else 0
-        sales_30d = sales_30d or 0
-        sales_customers = sales.iloc[0]['unique_customers'] if not sales.empty else 0
-        sales_customers = sales_customers or 0
-        
-        # Display KPIs
-        st.header("Key Performance Indicators")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
+            sales_perf = pd.read_sql(text(sales_perf_query), conn)
+
+        # Extract values cleanly
+        outstanding_val = (
+            float(outstanding.iloc[0]["total_outstanding"] or 0)
+            if not outstanding.empty
+            else 0.0
+        )
+        outstanding_customers = (
+            int(outstanding.iloc[0]["customer_count"] or 0)
+            if not outstanding.empty
+            else 0
+        )
+
+        stock_value = (
+            float(stock.iloc[0]["total_stock_value"] or 0)
+            if not stock.empty
+            else 0.0
+        )
+        stock_qty = (
+            int(stock.iloc[0]["total_qty"] or 0) if not stock.empty else 0
+        )
+
+        pdc_amount = (
+            float(pdc.iloc[0]["pdc_amount"] or 0) if not pdc.empty else 0.0
+        )
+        pdc_count = (
+            int(pdc.iloc[0]["pdc_count"] or 0) if not pdc.empty else 0
+        )
+
+        gross_sales = (
+            float(sales_perf.iloc[0]["gross_sales"] or 0)
+            if not sales_perf.empty
+            else 0.0
+        )
+        gross_purchases = (
+            float(sales_perf.iloc[0]["gross_purchases"] or 0)
+            if not sales_perf.empty
+            else 0.0
+        )
+        sales_customers = (
+            int(sales_perf.iloc[0]["unique_customers"] or 0)
+            if not sales_perf.empty
+            else 0
+        )
+
+        # ---------------------------------------------------------
+        # 2. Executive Math Core
+        # ---------------------------------------------------------
+        # Formula 1: Total Investments = O/S + PDC + Stock on Hand
+        total_investment = outstanding_val + pdc_amount + stock_value
+
+        # Formula 2: RoI = (Sales - Purchase) item-level - (Fixed + Variable) / Investment * 100
+        gross_profit = gross_sales - gross_purchases
+        total_overhead = fixed_expenses + variable_expenses
+        net_operating_profit = gross_profit - total_overhead
+
+        roi_pct = (
+            (net_operating_profit / total_investment) * 100
+            if total_investment > 0
+            else 0.0
+        )
+        gp_margin_pct = (
+            (gross_profit / gross_sales * 100) if gross_sales > 0 else 0.0
+        )
+
+        # ---------------------------------------------------------
+        # 3. High-Level KPI Header Ribbon
+        # ---------------------------------------------------------
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+
+        with kpi1:
             st.metric(
-                "💰 Outstanding Amount",
-                f"₹{outstanding_val:,.0f}",
-                f"{int(outstanding_customers)} customers"
+                "💼 Total Investment",
+                format_inr(total_investment),
+                f"O/S + PDC + Stock",
             )
-        
-        with col2:
+        with kpi2:
             st.metric(
-                "📦 Stock Value",
-                f"₹{stock_value:,.0f}",
-                f"{int(stock_qty):,} units"
+                f"📈 Gross Profit ({period_days}D)",
+                format_inr(gross_profit),
+                f"{gp_margin_pct:.1f}% GP Margin",
             )
-        
-        with col3:
+        with kpi3:
             st.metric(
-                "📄 PDCs",
-                f"{int(pdc_count)} cheques",
-                f"₹{pdc_amount:,.0f}"
+                "💵 Net Operating Profit",
+                format_inr(net_operating_profit),
+                f"-{format_inr(total_overhead)} Exp",
+                delta_color="inverse",
             )
-        
-        with col4:
+        with kpi4:
             st.metric(
-                "📊 Sales (Last 30D)",
-                f"₹{sales_30d:,.0f}",
-                f"{int(sales_customers)} customers"
+                "🎯 Capital RoI",
+                f"{roi_pct:.1f}%",
+                delta=f"{roi_pct - target_roi:.1f}% vs {target_roi:.0f}% Target",
             )
-        
+
         st.markdown("---")
-        
-        # Working Capital Summary
-        st.header("Working Capital Analysis")
-        
-        wc_col1, wc_col2, wc_col3 = st.columns(3)
-        
-        with wc_col1:
-            st.subheader("Receivables (Outstanding)")
-            st.metric("", f"₹{outstanding_val/10000000:.1f}Cr", "Amount due from customers")
-        
-        with wc_col2:
-            st.subheader("Inventory")
-            st.metric("", f"₹{stock_value/10000000:.1f}Cr", "Stock on hand")
-        
-        with wc_col3:
-            st.subheader("Liquidity (PDCs)")
-            st.metric("", f"₹{pdc_amount/1000000:.1f}M", "Post-dated cheques")
-        
-        # Division Breakdown
+
+        # ---------------------------------------------------------
+        # 4. Visual Charts: Working Capital vs. RoI Gauge
+        # ---------------------------------------------------------
+        chart_col1, chart_col2 = st.columns([1.1, 1])
+
+        with chart_col1:
+            st.subheader("Working Capital Allocation")
+            fig_donut = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=[
+                            "Receivables (O/S)",
+                            "PDC in Hand",
+                            "Stock on Hand",
+                        ],
+                        values=[outstanding_val, pdc_amount, stock_value],
+                        hole=0.60,
+                        marker=dict(
+                            colors=["#EF553B", "#FFA15A", "#00CC96"],
+                            line=dict(color="#ffffff", width=2),
+                        ),
+                        textinfo="label+percent",
+                        hovertemplate="<b>%{label}</b><br>Amount: ₹%{value:,.0f}<br>Share: %{percent}<extra></extra>",
+                    )
+                ]
+            )
+            fig_donut.update_layout(
+                height=350,
+                margin=dict(t=20, b=20, l=10, r=10),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=-0.2,
+                    xanchor="center",
+                    x=0.5,
+                ),
+                annotations=[
+                    dict(
+                        text=f"Total Invested<br><b>{format_inr(total_investment)}</b>",
+                        x=0.5,
+                        y=0.5,
+                        font_size=15,
+                        showarrow=False,
+                    )
+                ],
+            )
+            st.plotly_chart(fig_donut, use_container_width=True)
+
+        with chart_col2:
+            st.subheader("RoI Target Efficiency")
+            max_gauge_range = max(40.0, float(target_roi * 1.5))
+            fig_gauge = go.Figure(
+                go.Indicator(
+                    mode="gauge+number+delta",
+                    value=roi_pct,
+                    domain={"x": [0, 1], "y": [0, 1]},
+                    delta={"reference": target_roi, "suffix": "%"},
+                    number={"suffix": "%", "font": {"size": 36}},
+                    gauge={
+                        "axis": {
+                            "range": [0, max_gauge_range],
+                            "ticksuffix": "%",
+                        },
+                        "bar": {"color": "#1f77b4", "thickness": 0.3},
+                        "steps": [
+                            {"range": [0, 10], "color": "#FFCCCC"},
+                            {
+                                "range": [10, target_roi],
+                                "color": "#FFF3CD",
+                            },
+                            {
+                                "range": [target_roi, max_gauge_range],
+                                "color": "#D4EDDA",
+                            },
+                        ],
+                        "threshold": {
+                            "line": {"color": "#D9534F", "width": 4},
+                            "thickness": 0.8,
+                            "value": target_roi,
+                        },
+                    },
+                )
+            )
+            fig_gauge.update_layout(
+                height=350,
+                margin=dict(t=30, b=20, l=30, r=30),
+            )
+            st.plotly_chart(fig_gauge, use_container_width=True)
+
+        # ---------------------------------------------------------
+        # 5. P&L to RoI Waterfall Realization Bridge
+        # ---------------------------------------------------------
+        st.subheader(f"P&L to Profit Realization Bridge ({period_days} Days)")
+
+        fig_waterfall = go.Figure(
+            go.Waterfall(
+                name="Profit Flow",
+                orientation="v",
+                measure=[
+                    "relative",
+                    "relative",
+                    "total",
+                    "relative",
+                    "relative",
+                    "total",
+                ],
+                x=[
+                    "Gross Sales",
+                    "Purchase (COGS)",
+                    "Gross Profit",
+                    "Fixed Overhead",
+                    "Variable Overhead",
+                    "Net Operating Profit",
+                ],
+                y=[
+                    gross_sales,
+                    -gross_purchases,
+                    gross_profit,
+                    -fixed_expenses,
+                    -variable_expenses,
+                    net_operating_profit,
+                ],
+                text=[
+                    format_inr(gross_sales),
+                    f"-{format_inr(gross_purchases)}",
+                    format_inr(gross_profit),
+                    f"-{format_inr(fixed_expenses)}",
+                    f"-{format_inr(variable_expenses)}",
+                    format_inr(net_operating_profit),
+                ],
+                textposition="outside",
+                decreasing={"marker": {"color": "#E74C3C"}},
+                increasing={"marker": {"color": "#27AE60"}},
+                totals={"marker": {"color": "#2980B9"}},
+                connector={"line": {"color": "#7F8C8D"}},
+            )
+        )
+
+        fig_waterfall.update_layout(
+            height=380,
+            margin=dict(t=30, b=30, l=20, r=20),
+            yaxis=dict(title="Amount (₹)", tickprefix="₹", tickformat=","),
+            waterfallgap=0.3,
+        )
+        st.plotly_chart(fig_waterfall, use_container_width=True)
+
+        # ---------------------------------------------------------
+        # 6. Division Breakdown Table
+        # ---------------------------------------------------------
         st.markdown("---")
         st.header("Division Breakdown")
-        
-        div_query = """
+
+        div_query = f"""
         SELECT 
             s.division,
             COALESCE((SELECT SUM(pending_amount) FROM outstanding_debtors WHERE division = s.division), 0) as outstanding,
             COALESCE((SELECT SUM(stock_value) FROM items WHERE division = s.division AND source_system = 'shoper'), 0) as stock_value,
-            COALESCE(SUM(s.net_value), 0) as sales_30d
+            COALESCE(SUM(s.net_value * {sign_mult_expr}), 0) as sales_period
         FROM sales s
         WHERE s.source_system = 'shoper'
-            AND s.sale_date >= CURRENT_DATE - INTERVAL '30 days'
+            AND s.sale_date >= CURRENT_DATE - INTERVAL '{period_days} days'
         GROUP BY s.division
         ORDER BY s.division
         """
-        
+
         with engine.begin() as conn:
             div_df = pd.read_sql(text(div_query), conn)
-        
+
         if not div_df.empty:
-            # Format for display
-            div_df['outstanding'] = div_df['outstanding'].apply(lambda x: f"₹{x/10000000:.1f}Cr" if x else "₹0")
-            div_df['stock_value'] = div_df['stock_value'].apply(lambda x: f"₹{x/10000000:.1f}Cr" if x else "₹0")
-            div_df['sales_30d'] = div_df['sales_30d'].apply(lambda x: f"₹{x/10000000:.1f}Cr" if x else "₹0")
-            
+            div_df["outstanding"] = div_df["outstanding"].apply(format_inr)
+            div_df["stock_value"] = div_df["stock_value"].apply(format_inr)
+            div_df["sales_period"] = div_df["sales_period"].apply(format_inr)
+
             st.dataframe(
                 div_df,
                 use_container_width=True,
@@ -171,36 +443,52 @@ def show_executive_dashboard():
                     "division": st.column_config.TextColumn("Division"),
                     "outstanding": st.column_config.TextColumn("Outstanding"),
                     "stock_value": st.column_config.TextColumn("Stock Value"),
-                    "sales_30d": st.column_config.TextColumn("Sales (30D)")
-                }
+                    "sales_period": st.column_config.TextColumn(
+                        f"Sales ({period_days}D)"
+                    ),
+                },
             )
-        
-        # Health Check
+
+        # ---------------------------------------------------------
+        # 7. Business Health Checks
+        # ---------------------------------------------------------
         st.markdown("---")
-        st.header("📊 Business Health Check")
-        
-        health_col1, health_col2, health_col3 = st.columns(3)
-        
-        with health_col1:
+        st.header("📊 Business Health & Capital Guardrails")
+
+        h_col1, h_col2, h_col3 = st.columns(3)
+
+        with h_col1:
             if outstanding_val > stock_value * 1.5:
-                st.warning("⚠️ High Receivables - Consider accelerating collections")
+                st.warning(
+                    "⚠️ High Receivables: Outstanding exceeds 1.5x inventory"
+                    " value."
+                )
             else:
-                st.success("✅ Receivables in healthy range")
-        
-        with health_col2:
+                st.success("✅ Receivables in healthy balance with stock.")
+
+        with h_col2:
             if pdc_count > 50:
-                st.warning(f"⚠️ High PDC count ({pdc_count}) - Monitor cash flow")
+                st.warning(
+                    f"⚠️ High PDC Count ({pdc_count} cheques): Monitor"
+                    " clearance dates."
+                )
             else:
-                st.info(f"ℹ️ {pdc_count} Post-dated cheques in hand")
-        
-        with health_col3:
-            if sales_30d > 0:
-                collection_ratio = outstanding_val / (sales_30d / 30)
-                st.metric("Collection Ratio", f"{collection_ratio:.1f} days of sales")
-    
+                st.info(f"ℹ️ {pdc_count} Post-Dated Cheques awaiting deposit.")
+
+        with h_col3:
+            if gross_sales > 0:
+                daily_run_rate = gross_sales / period_days
+                days_sales_os = outstanding_val / daily_run_rate
+                st.metric(
+                    "DSO (Days Sales Outstanding)",
+                    f"{days_sales_os:.1f} Days",
+                    f"Target < 45 Days",
+                )
+
     except Exception as e:
-        st.error(f"Error loading executive data: {e}")
+        st.error(f"Error compiling Executive Dashboard: {e}")
         import traceback
+
         st.error(traceback.format_exc())
 
 
