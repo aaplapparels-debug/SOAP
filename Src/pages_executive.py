@@ -95,8 +95,8 @@ def show_executive_dashboard():
             sales_cols = set(sales_cols_df["column_name"].str.lower().tolist())
 
         # Determine cost expression for item-level purchase cost
-        if "purchase_rate" in item_cols:
-            cost_expr = "COALESCE(i.purchase_rate, 0)"
+        if "current_cost" in item_cols:
+            cost_expr = "COALESCE(i.current_cost, 0)"
         elif "pur_rate" in item_cols:
             cost_expr = "COALESCE(i.pur_rate, 0)"
         elif "cost_rate" in item_cols:
