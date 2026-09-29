@@ -96,7 +96,7 @@ def show_executive_dashboard():
 
         # Determine cost expression for item-level purchase cost
         if "current_cost" in item_cols:
-            cost_expr = "COALESCE(i.current_cost, 0)"
+            cost_expr = "COALESCE(max(i.current_cost), 0)"
         elif "pur_rate" in item_cols:
             cost_expr = "COALESCE(i.pur_rate, 0)"
         elif "cost_rate" in item_cols:
