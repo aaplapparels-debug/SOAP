@@ -261,46 +261,6 @@ def show_executive_dashboard():
             )
 
         st.markdown("---")
-        # --------------------------------------------------------
-        # 6. Division Breakdown Table
-        # --------------------------------------------------------
-        st.markdown("---")
-        st.header("Division Breakdown")
-
-        div_query = f"""
-        SELECT 
-            s.division,
-            COALESCE((SELECT SUM(pending_amount) FROM outstanding_debtors WHERE division = s.division), 0) as outstanding,
-            COALESCE((SELECT SUM(stock_value) FROM items WHERE division = s.division AND source_system = 'shoper'), 0) as stock_value,
-            COALESCE(SUM(s.net_value * {sign_mult_expr}), 0) as sales_period
-        FROM sales s
-        WHERE s.source_system = 'shoper'
-            AND s.sale_date >= CURRENT_DATE - INTERVAL '{period_days} days'
-        GROUP BY s.division
-        ORDER BY s.division
-        """
-
-        with engine.begin() as conn:
-            div_df = pd.read_sql(text(div_query), conn)
-
-        if not div_df.empty:
-            div_df["outstanding"] = div_df["outstanding"].apply(format_inr)
-            div_df["stock_value"] = div_df["stock_value"].apply(format_inr)
-            div_df["sales_period"] = div_df["sales_period"].apply(format_inr)
-
-            st.dataframe(
-                div_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "division": st.column_config.TextColumn("Division"),
-                    "outstanding": st.column_config.TextColumn("Outstanding"),
-                    "stock_value": st.column_config.TextColumn("Stock Value"),
-                    "sales_period": st.column_config.TextColumn(
-                        f"Sales ({period_days}D)"
-                    ),
-                },
-            )
 
         # ---------------------------------------------------------
         # 4. Visual Charts: Working Capital vs. RoI Gauge
@@ -447,6 +407,47 @@ def show_executive_dashboard():
             waterfallgap=0.3,
         )
         st.plotly_chart(fig_waterfall, use_container_width=True)
+
+                # --------------------------------------------------------
+        # 6. Division Breakdown Table
+        # --------------------------------------------------------
+        st.markdown("---")
+        st.header("Division Breakdown")
+
+        div_query = f"""
+        SELECT 
+            s.division,
+            COALESCE((SELECT SUM(pending_amount) FROM outstanding_debtors WHERE division = s.division), 0) as outstanding,
+            COALESCE((SELECT SUM(stock_value) FROM items WHERE division = s.division AND source_system = 'shoper'), 0) as stock_value,
+            COALESCE(SUM(s.net_value * {sign_mult_expr}), 0) as sales_period
+        FROM sales s
+        WHERE s.source_system = 'shoper'
+            AND s.sale_date >= CURRENT_DATE - INTERVAL '{period_days} days'
+        GROUP BY s.division
+        ORDER BY s.division
+        """
+
+        with engine.begin() as conn:
+            div_df = pd.read_sql(text(div_query), conn)
+
+        if not div_df.empty:
+            div_df["outstanding"] = div_df["outstanding"].apply(format_inr)
+            div_df["stock_value"] = div_df["stock_value"].apply(format_inr)
+            div_df["sales_period"] = div_df["sales_period"].apply(format_inr)
+
+            st.dataframe(
+                div_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "division": st.column_config.TextColumn("Division"),
+                    "outstanding": st.column_config.TextColumn("Outstanding"),
+                    "stock_value": st.column_config.TextColumn("Stock Value"),
+                    "sales_period": st.column_config.TextColumn(
+                        f"Sales ({period_days}D)"
+                    ),
+                },
+            )
 
 
         # ---------------------------------------------------------
