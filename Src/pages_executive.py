@@ -260,7 +260,7 @@ def show_executive_dashboard():
                 delta=f"{roi_pct - target_roi:.1f}% vs {target_roi:.0f}% Target",
             )
 
-
+        st.markdown("---")
         # --------------------------------------------------------
         # 6. Division Breakdown Table
         # --------------------------------------------------------
@@ -301,8 +301,6 @@ def show_executive_dashboard():
                     ),
                 },
             )
-
-        st.markdown("---")
 
         # ---------------------------------------------------------
         # 4. Visual Charts: Working Capital vs. RoI Gauge
