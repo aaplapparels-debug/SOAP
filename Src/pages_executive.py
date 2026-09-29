@@ -145,16 +145,24 @@ def show_executive_dashboard():
 
         # 4. Item-Level Sales & Purchase Cost for Gross Profit
         sales_perf_query = f"""
+        WITH deduped_item_costs AS (
+            SELECT 
+                item_code,
+                division,
+                MAX({cost_expr}) AS unit_cost
+            FROM items
+            WHERE source_system = 'shoper'
+            GROUP BY item_code, division
+        )
         SELECT 
             COALESCE(SUM(s.net_value * {sign_mult_expr}), 0) as gross_sales,
-            COALESCE(SUM(s.qty * {sign_mult_expr} * {cost_expr}), 0) as gross_purchases,
+            COALESCE(SUM(s.qty * {sign_mult_expr} * COALESCE(ic.unit_cost, 0)), 0) as gross_purchases,
             COUNT(DISTINCT s.customer_code) as unique_customers,
             MAX(s.sale_date) as last_sale_date
         FROM sales s
-        LEFT JOIN items i 
-            ON s.item_code = i.item_code 
-            AND s.division = i.division 
-            AND i.source_system = 'shoper'
+        LEFT JOIN deduped_item_costs ic 
+            ON s.item_code = ic.item_code 
+            AND s.division = ic.division
         WHERE s.source_system = 'shoper'
             AND s.sale_date >= CURRENT_DATE - INTERVAL '{period_days} days'
         """
