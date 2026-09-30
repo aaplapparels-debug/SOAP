@@ -4,13 +4,17 @@ from config_loader import load_config
 import pandas as pd
 import plotly.graph_objects as go
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 import streamlit as st
 
 
 @st.cache_resource
 def get_engine():
     config = load_config()
-    return create_engine(config["postgres"]["connection_string"],poolclass=NullPool)
+    # NullPool prevents poisoned connection states across Streamlit Cloud reruns
+    return create_engine(
+        config["postgres"]["connection_string"], poolclass=NullPool
+    )
 
 
 def format_inr(val):
@@ -74,8 +78,8 @@ def show_executive_dashboard():
             )
 
     try:
-        # Inspect available columns in items and sales to handle cost and sign multipliers safely
-        with engine.begin() as conn:
+        # Use engine.connect() for read-only schema inspection
+        with engine.connect() as conn:
             item_cols_df = pd.read_sql(
                 text(
                     "SELECT column_name FROM information_schema.columns WHERE"
@@ -115,7 +119,6 @@ def show_executive_dashboard():
         # ---------------------------------------------------------
         # 1. Database Queries
         # ---------------------------------------------------------
-        # 1. Outstanding Debtors (Tally)
         outstanding_query = """
         SELECT 
             SUM(pending_amount) as total_outstanding,
@@ -123,7 +126,6 @@ def show_executive_dashboard():
         FROM outstanding_debtors
         """
 
-        # 2. Stock Value (Shoper inventory)
         stock_query = """
         SELECT 
             SUM(stock_value) as total_stock_value,
@@ -132,7 +134,6 @@ def show_executive_dashboard():
         WHERE source_system = 'shoper'
         """
 
-        # 3. PDCs (Post-Dated Cheques from Tally receipts)
         pdc_query = """
         SELECT 
             COUNT(*) as pdc_count,
@@ -143,14 +144,14 @@ def show_executive_dashboard():
             AND CAST(instrument_date AS DATE) > CURRENT_DATE
         """
 
-        # 4. Item-Level Sales & Purchase Cost for Gross Profit
+        # Aliased 'items i' inside the CTE and cast item_code for type safety
         sales_perf_query = f"""
         WITH deduped_item_costs AS (
             SELECT 
                 item_code,
                 division,
                 MAX({cost_expr}) AS unit_cost
-            FROM items
+            FROM items i
             WHERE source_system = 'shoper'
             GROUP BY item_code, division
         )
@@ -161,13 +162,13 @@ def show_executive_dashboard():
             MAX(s.sale_date) as last_sale_date
         FROM sales s
         LEFT JOIN deduped_item_costs ic 
-            ON s.item_code = ic.item_code 
+            ON CAST(s.item_code AS VARCHAR) = CAST(ic.item_code AS VARCHAR)
             AND s.division = ic.division
         WHERE s.source_system = 'shoper'
             AND s.sale_date >= CURRENT_DATE - INTERVAL '{period_days} days'
         """
 
-        with engine.begin() as conn:
+        with engine.connect() as conn:
             outstanding = pd.read_sql(text(outstanding_query), conn)
             stock = pd.read_sql(text(stock_query), conn)
             pdc = pd.read_sql(text(pdc_query), conn)
@@ -179,28 +180,17 @@ def show_executive_dashboard():
             if not outstanding.empty
             else 0.0
         )
-        outstanding_customers = (
-            int(outstanding.iloc[0]["customer_count"] or 0)
-            if not outstanding.empty
-            else 0
-        )
-
         stock_value = (
             float(stock.iloc[0]["total_stock_value"] or 0)
             if not stock.empty
             else 0.0
         )
-        stock_qty = (
-            int(stock.iloc[0]["total_qty"] or 0) if not stock.empty else 0
-        )
-
         pdc_amount = (
             float(pdc.iloc[0]["pdc_amount"] or 0) if not pdc.empty else 0.0
         )
         pdc_count = (
             int(pdc.iloc[0]["pdc_count"] or 0) if not pdc.empty else 0
         )
-
         gross_sales = (
             float(sales_perf.iloc[0]["gross_sales"] or 0)
             if not sales_perf.empty
@@ -211,19 +201,11 @@ def show_executive_dashboard():
             if not sales_perf.empty
             else 0.0
         )
-        sales_customers = (
-            int(sales_perf.iloc[0]["unique_customers"] or 0)
-            if not sales_perf.empty
-            else 0
-        )
 
         # ---------------------------------------------------------
         # 2. Executive Math Core
         # ---------------------------------------------------------
-        # Formula 1: Total Investments = O/S + PDC + Stock on Hand
         total_investment = outstanding_val + pdc_amount + stock_value
-
-        # Formula 2: RoI = (Sales - Purchase) item-level - (Fixed + Variable) / Investment * 100
         gross_profit = gross_sales - gross_purchases
         total_overhead = fixed_expenses + variable_expenses
         net_operating_profit = gross_profit - total_overhead
@@ -241,12 +223,11 @@ def show_executive_dashboard():
         # 3. High-Level KPI Header Ribbon
         # ---------------------------------------------------------
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-
         with kpi1:
             st.metric(
                 "💼 Total Investment",
                 format_inr(total_investment),
-                f"O/S + PDC + Stock",
+                "O/S + PDC + Stock",
             )
         with kpi2:
             st.metric(
@@ -268,9 +249,9 @@ def show_executive_dashboard():
                 delta=f"{roi_pct - target_roi:.1f}% vs {target_roi:.0f}% Target",
             )
 
-        # --------------------------------------------------------
-        # 6. Division Breakdown Table
-        # --------------------------------------------------------
+        # ---------------------------------------------------------
+        # 4. Division Breakdown Table
+        # ---------------------------------------------------------
         st.markdown("---")
         st.header("Division Breakdown")
 
@@ -287,7 +268,7 @@ def show_executive_dashboard():
         ORDER BY s.division
         """
 
-        with engine.begin() as conn:
+        with engine.connect() as conn:
             div_df = pd.read_sql(text(div_query), conn)
 
         if not div_df.empty:
@@ -309,11 +290,10 @@ def show_executive_dashboard():
                 },
             )
 
-
         st.markdown("---")
 
         # ---------------------------------------------------------
-        # 4. Visual Charts: Working Capital vs. RoI Gauge
+        # 5. Visual Charts: Working Capital vs. RoI Gauge
         # ---------------------------------------------------------
         chart_col1, chart_col2 = st.columns([1.1, 1])
 
@@ -402,7 +382,7 @@ def show_executive_dashboard():
             st.plotly_chart(fig_gauge, use_container_width=True)
 
         # ---------------------------------------------------------
-        # 5. P&L to RoI Waterfall Realization Bridge
+        # 6. P&L to RoI Waterfall Realization Bridge
         # ---------------------------------------------------------
         st.subheader(f"P&L to Profit Realization Bridge ({period_days} Days)")
 
@@ -458,7 +438,6 @@ def show_executive_dashboard():
         )
         st.plotly_chart(fig_waterfall, use_container_width=True)
 
-
         # ---------------------------------------------------------
         # 7. Business Health Checks
         # ---------------------------------------------------------
@@ -492,7 +471,7 @@ def show_executive_dashboard():
                 st.metric(
                     "DSO (Days Sales Outstanding)",
                     f"{days_sales_os:.1f} Days",
-                    f"Target < 45 Days",
+                    "Target < 45 Days",
                 )
 
     except Exception as e:
