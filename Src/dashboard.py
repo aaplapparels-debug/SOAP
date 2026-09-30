@@ -28,15 +28,46 @@ st.set_page_config(
 
 config = load_config()
 dashboard_cfg = config["dashboard"]
-SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
+#SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
 
 def get_oauth_flow() -> Flow:
-    return Flow.from_client_secrets_file(
-        dashboard_cfg["oauth_client_secret_file"],
-        scopes=SCOPES,
-        redirect_uri=dashboard_cfg["redirect_uri"],
+    scopes = [
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+    ]
+    # 1. Prefer Streamlit Cloud Secrets (No physical JSON file needed)
+    if "oauth" in st.secrets:
+        client_config = {
+            "web": {
+                "client_id": st.secrets["oauth"]["client_id"],
+                "client_secret": st.secrets["oauth"]["client_secret"],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        }
+        return Flow.from_client_config(
+            client_config,
+            scopes=scopes,
+            redirect_uri=st.secrets["oauth"]["redirect_uri"],
+        )
+    # 2. Fallback to local config.yaml / JSON file
+    secret_file = dashboard_cfg.get(
+        "oauth_client_secret_file", "client_secret.json"
     )
+    redirect_uri = dashboard_cfg.get(
+        "redirect_uri", "http://localhost:8501"
+    )
+
+    return Flow.from_client_secrets_file(
+        secret_file, scopes=scopes, redirect_uri=redirect_uri
+    )
+    #return Flow.from_client_secrets_file(
+    #    dashboard_cfg["oauth_client_secret_file"],
+    #    scopes=SCOPES,
+    #    redirect_uri=dashboard_cfg["redirect_uri"],
+    #)
 
 
 def get_user_role(email: str):
