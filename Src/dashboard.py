@@ -157,7 +157,7 @@ else:
         st.Page(show_executive_dashboard, title="Executive Dashboard", icon="👔"),
         st.Page(show_stock_position, title="Stock Position", icon="📦"),
         st.Page(show_sales_360, title="Sales 360°", icon="🔄"),
-        st.page(show_delivery_dashboard,title"Delivery Dashboard",icon="🚚")
+        st.page(show_delivery_dashboard,title="Delivery Dashboard",icon="🚚")
     ]
 
     pg = st.navigation(pages, position="sidebar", expanded=True)
