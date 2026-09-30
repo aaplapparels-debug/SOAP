@@ -66,6 +66,8 @@ def show_delivery_dashboard():
 
     if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
         start_dt, end_dt = date_range
+    elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
+        start_dt = end_dt = date_range[0]
     else:
         start_dt = end_dt = date.today()
 
@@ -91,10 +93,10 @@ def show_delivery_dashboard():
         q = search_query.strip()
         search_clause = f"""
             AND (
-                s.doc_no ILIKE '%%{q}%%' 
-                OR s.doc_prefix ILIKE '%%{q}%%' 
-                OR (s.doc_prefix || '-' || s.doc_no) ILIKE '%%{q}%%'
-                OR s.customer_code ILIKE '%%{q}%%'
+                CAST(s.doc_no AS TEXT) ILIKE '%%{q}%%' 
+                OR CAST(s.doc_prefix AS TEXT) ILIKE '%%{q}%%' 
+                OR CONCAT(s.doc_prefix || '-' || s.doc_no) ILIKE '%%{q}%%'
+                OR CAST(s.customer_code AS TEXT) ILIKE '%%{q}%%'
             )
         """
 
@@ -103,7 +105,7 @@ def show_delivery_dashboard():
         s.division,
         s.doc_prefix,
         s.doc_no,
-        (s.doc_prefix || '-' || s.doc_no) AS full_doc_no,
+        CONCAT(s.doc_prefix || '-' || s.doc_no) AS full_doc_no,
         s.sale_date,
         s.customer_code,
         SUM(s.qty * COALESCE(s.sign_multiplier, 1)) AS total_qty,
@@ -120,7 +122,7 @@ def show_delivery_dashboard():
     LEFT JOIN delivery_status d 
         ON s.division = d.division 
         AND s.doc_prefix = d.doc_prefix
-        AND s.doc_no = d.doc_no
+        AND CAST(s.doc_no AS VARCHAR) = d.doc_no
     WHERE s.source_system = 'shoper'
       AND s.sale_date BETWEEN CAST(:start_dt AS DATE) AND CAST(:end_dt AS DATE)
       {division_clause}
