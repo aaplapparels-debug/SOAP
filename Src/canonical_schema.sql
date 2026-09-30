@@ -231,3 +231,44 @@ LEFT JOIN sales s
    AND s.customer_code <> '1001'
    AND s.item_code <> '8901326926543'
 GROUP BY t.jc_code, t.financial_year, t.division, p.start_date, p.end_date, t.target_pcs;
+
+
+
+-- 1. Current Delivery State Table
+CREATE TABLE IF NOT EXISTS  delivery_status (
+    id SERIAL PRIMARY KEY,
+    division VARCHAR(32) NOT NULL,
+    doc_prefix VARCHAR(32) NOT NULL,
+    doc_no VARCHAR(64) NOT NULL,
+    customer_code VARCHAR(64),
+    status VARCHAR(32) NOT NULL DEFAULT 'Open', -- 'Open', 'Dispatched', 'Delivered', 'On Hold', 'Reversed/Returned'
+    transporter VARCHAR(128),
+    tracking_no VARCHAR(128),
+    dispatch_date DATE,
+    delivery_date DATE,
+    remarks TEXT,
+    updated_by VARCHAR(128),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_division_doc UNIQUE (division, doc_prefix, doc_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_delivery_status_lookup 
+    ON delivery_status (division, doc_prefix, doc_no);
+CREATE INDEX IF NOT EXISTS idx_delivery_status_current 
+    ON delivery_status (status);
+
+-- 2. Audit Trail History Table
+CREATE TABLE IF NOT EXISTS  delivery_status_history (
+    id SERIAL PRIMARY KEY,
+    division VARCHAR(32) NOT NULL,
+    doc_prefix VARCHAR(32) NOT NULL,
+    doc_no VARCHAR(64) NOT NULL,
+    previous_status VARCHAR(32),
+    new_status VARCHAR(32) NOT NULL,
+    transporter VARCHAR(128),
+    tracking_no VARCHAR(128),
+    remarks TEXT,
+    changed_by VARCHAR(128),
+    changed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

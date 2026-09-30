@@ -15,6 +15,7 @@ from pages_sales_dashboard import show_sales_dashboard
 from pages_executive import show_executive_dashboard
 from pages_stock import show_stock_position
 from pages_sales360 import show_sales_360
+from pages_delivery_dashboard import show_delivery_dashboard
 
 
 
@@ -26,36 +27,15 @@ st.set_page_config(
 )
 
 config = load_config()
-dashboard_cfg = config.get("dashboard", {})
+dashboard_cfg = config["dashboard"]
 SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
 
-def get_oauth_flow():
-    scopes = [
-        "openid",
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/userinfo.profile",
-    ]
-
-    # Check if OAuth configuration is passed directly as a dictionary in secrets
-    if "oauth" in dashboard_cfg:
-        client_config = (
-            dashboard_cfg["oauth"].to_dict()
-            if hasattr(dashboard_cfg["oauth"], "to_dict")
-            else dict(dashboard_cfg["oauth"])
-        )
-        return Flow.from_client_config(
-            client_config,
-            scopes=scopes,
-            redirect_uri="https://aapl-soap.streamlit.app",  # Your production Streamlit URL
-        )
-
-    # Fallback to local client_secret.json file for local development
-    secret_file = dashboard_cfg.get(
-        "oauth_client_secret_file", "dashboard_client_secret.json"
-    )
+def get_oauth_flow() -> Flow:
     return Flow.from_client_secrets_file(
-        secret_file, scopes=scopes, redirect_uri="http://localhost:8501"
+        dashboard_cfg["oauth_client_secret_file"],
+        scopes=SCOPES,
+        redirect_uri=dashboard_cfg["redirect_uri"],
     )
 
 
@@ -177,6 +157,7 @@ else:
         st.Page(show_executive_dashboard, title="Executive Dashboard", icon="👔"),
         st.Page(show_stock_position, title="Stock Position", icon="📦"),
         st.Page(show_sales_360, title="Sales 360°", icon="🔄"),
+        st.page(show_delivery_dashboard,title"Delivery Dashboard",icon="🚚")
     ]
 
     pg = st.navigation(pages, position="sidebar", expanded=True)
