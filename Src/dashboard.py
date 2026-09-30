@@ -32,6 +32,26 @@ SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
 
 def get_oauth_flow() -> Flow:
+    # 1. Cloud: if secrets has [dashboard.oauth]
+    if "oauth" in dashboard_cfg:
+        oauth_info = dashboard_cfg["oauth"]
+        redirect_uri = oauth_info.get("redirect_uri") or dashboard_cfg.get(
+            "redirect_uri"
+        )
+        client_config = {
+            "web": {
+                "client_id": oauth_info["client_id"],
+                "client_secret": oauth_info["client_secret"],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [redirect_uri],
+            }
+        }
+        return Flow.from_client_config(
+            client_config, scopes=SCOPES, redirect_uri=redirect_uri
+        )
+
+    # 2. Local fallback: use JSON file
     return Flow.from_client_secrets_file(
         dashboard_cfg["oauth_client_secret_file"],
         scopes=SCOPES,
@@ -157,7 +177,7 @@ else:
         st.Page(show_executive_dashboard, title="Executive Dashboard", icon="👔"),
         st.Page(show_stock_position, title="Stock Position", icon="📦"),
         st.Page(show_sales_360, title="Sales 360°", icon="🔄"),
-        st.page(show_delivery_dashboard,title="Delivery Dashboard",icon="🚚"),
+        st.Page(show_delivery_dashboard,title="Delivery Dashboard",icon="🚚"),
     ]
 
     pg = st.navigation(pages, position="sidebar", expanded=True)
