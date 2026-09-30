@@ -4,13 +4,18 @@ from datetime import date
 from config_loader import load_config
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 import streamlit as st
 
 
 @st.cache_resource
 def get_engine():
     config = load_config()
-    return create_engine(config["postgres"]["connection_string"])
+    # NullPool prevents poisoned connection states across Streamlit reruns
+    return create_engine(
+        config["postgres"]["connection_string"],
+        poolclass=NullPool,
+    )
 
 
 def show_delivery_dashboard():
@@ -48,7 +53,8 @@ def show_delivery_dashboard():
                 index=0,
             )
         with f_col3:
-            with engine.begin() as conn:
+            # Use engine.connect() for read-only SELECT queries
+            with engine.connect() as conn:
                 divs = pd.read_sql(
                     text(
                         "SELECT DISTINCT division FROM sales WHERE"
@@ -64,6 +70,7 @@ def show_delivery_dashboard():
                 "Search Doc No / Prefix / Customer", value=""
             )
 
+    # Safe date handling for incomplete user clicks
     if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
         start_dt, end_dt = date_range
     elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
@@ -72,7 +79,7 @@ def show_delivery_dashboard():
         start_dt = end_dt = date.today()
 
     # ---------------------------------------------------------
-    # 2. Build Query Clauses
+    # 2. Build Query Clauses (Type-Safe for integer doc_no)
     # ---------------------------------------------------------
     status_clause = ""
     if status_filter == "All Pending (Open/Hold/Dispatched)":
@@ -95,7 +102,7 @@ def show_delivery_dashboard():
             AND (
                 CAST(s.doc_no AS TEXT) ILIKE '%%{q}%%' 
                 OR CAST(s.doc_prefix AS TEXT) ILIKE '%%{q}%%' 
-                OR CONCAT(s.doc_prefix || '-' || s.doc_no) ILIKE '%%{q}%%'
+                OR CONCAT(s.doc_prefix, '-', s.doc_no) ILIKE '%%{q}%%'
                 OR CAST(s.customer_code AS TEXT) ILIKE '%%{q}%%'
             )
         """
@@ -105,7 +112,7 @@ def show_delivery_dashboard():
         s.division,
         s.doc_prefix,
         s.doc_no,
-        CONCAT(s.doc_prefix || '-' || s.doc_no) AS full_doc_no,
+        CONCAT(s.doc_prefix, '-', s.doc_no) AS full_doc_no,
         s.sale_date,
         s.customer_code,
         SUM(s.qty * COALESCE(s.sign_multiplier, 1)) AS total_qty,
@@ -135,7 +142,7 @@ def show_delivery_dashboard():
     ORDER BY s.sale_date DESC, s.doc_no DESC;
     """
 
-    with engine.begin() as conn:
+    with engine.connect() as conn:
         df = pd.read_sql(
             text(fetch_sql), conn, params={"start_dt": start_dt, "end_dt": end_dt}
         )
@@ -240,7 +247,7 @@ def show_delivery_dashboard():
     )
 
     # ---------------------------------------------------------
-    # 5. Commit Updates & Audit Trail
+    # 5. Commit Updates & Audit Trail (Transaction block)
     # ---------------------------------------------------------
     if st.button("💾 Commit Delivery Updates", type="primary"):
         diff_mask = (
