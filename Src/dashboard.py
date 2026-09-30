@@ -32,30 +32,25 @@ SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
 
 def get_oauth_flow() -> Flow:
-    # 1. Cloud: if secrets has [dashboard.oauth]
+    # 1. Cloud: Uses [dashboard.oauth] from your secrets
     if "oauth" in dashboard_cfg:
-        oauth_info = dashboard_cfg["oauth"]
-        redirect_uri = oauth_info.get("redirect_uri") or dashboard_cfg.get(
-            "redirect_uri"
-        )
-        client_config = {
-            "web": {
-                "client_id": oauth_info["client_id"],
-                "client_secret": oauth_info["client_secret"],
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [redirect_uri],
-            }
-        }
+        oauth_cfg = dashboard_cfg["oauth"]
+        # Extract redirect_uri from your web table in TOML
+        redirect_uri = oauth_cfg["web"]["redirect_uris"][0]
+
         return Flow.from_client_config(
-            client_config, scopes=SCOPES, redirect_uri=redirect_uri
+            client_config=dict(oauth_cfg),
+            scopes=SCOPES,
+            redirect_uri=redirect_uri,
         )
 
-    # 2. Local fallback: use JSON file
+    # 2. Local fallback for offline dev
     return Flow.from_client_secrets_file(
-        dashboard_cfg["oauth_client_secret_file"],
+        dashboard_cfg.get("oauth_client_secret_file", "client_secret.json"),
         scopes=SCOPES,
-        redirect_uri=dashboard_cfg["redirect_uri"],
+        redirect_uri=dashboard_cfg.get(
+            "redirect_uri", "https://aapl-soap.streamlit.app"
+        ),
     )
 
 
