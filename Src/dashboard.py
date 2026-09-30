@@ -50,7 +50,7 @@ def get_oauth_flow() -> Flow:
         return Flow.from_client_config(
             client_config,
             scopes=scopes,
-            redirect_uri=st.secrets["oauth"]["redirect_uri"],
+            redirect_uri=st.secrets["dashboard.oauth"]["redirect_uri"],
         )
     # 2. Fallback to local config.yaml / JSON file
     secret_file = dashboard_cfg.get(
