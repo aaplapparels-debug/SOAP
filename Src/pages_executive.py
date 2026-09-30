@@ -10,7 +10,7 @@ import streamlit as st
 @st.cache_resource
 def get_engine():
     config = load_config()
-    return create_engine(config["postgres"]["connection_string"])
+    return create_engine(config["postgres"]["connection_string"],, poolclass=NullPool)
 
 
 def format_inr(val):
