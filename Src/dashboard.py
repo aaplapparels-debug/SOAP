@@ -415,6 +415,10 @@ else:
     page_delivery = st.Page(
         show_delivery_dashboard, title="Delivery Dashboard", icon="🚚"
     )
+    log_out = st.Page((st.session_state.user_email = None
+                       st.session_state.user_role = None
+                       st.rerun()), title="Log Out" icon ="🚪")
+    
 
     pages = [
         page_home,
@@ -424,6 +428,7 @@ else:
         page_stock,
         page_sales360,
         page_delivery,
+        log_out,
     ]
 
     pg = st.navigation(pages, position="sidebar", expanded=True)
