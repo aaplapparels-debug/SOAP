@@ -415,7 +415,7 @@ else:
     page_delivery = st.Page(
         show_delivery_dashboard, title="Delivery Dashboard", icon="🚚"
     )
-    log_out = st.Page(" ", title="Log Out" icon ="🚪")
+    log_out = st.Page(" ", title="Log Out", icon ="🚪")
     
 
     pages = [
