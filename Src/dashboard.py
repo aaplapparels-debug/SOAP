@@ -415,9 +415,7 @@ else:
     page_delivery = st.Page(
         show_delivery_dashboard, title="Delivery Dashboard", icon="🚚"
     )
-    log_out = st.Page((st.session_state.user_email = None
-                       st.session_state.user_role = None
-                       st.rerun()), title="Log Out" icon ="🚪")
+    log_out = st.Page(" ", title="Log Out" icon ="🚪")
     
 
     pages = [
