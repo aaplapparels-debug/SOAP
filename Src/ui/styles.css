@@ -1,0 +1,67 @@
+/* Reduce title fonts to roughly half their normal sizes */
+h1, .st-emotion-cache-10trblm h1 {
+    font-size: 1.1rem !important;
+    padding-bottom: 0.5rem !important;
+}
+
+h2, .st-emotion-cache-10trblm h2 {
+    font-size: 0.9rem !important;
+    padding-bottom: 0.4rem !important;
+}
+
+h3, .st-emotion-cache-10trblm h3 {
+    font-size: 0.75rem !important;
+    padding-bottom: 0.3rem !important;
+}
+
+/* Also target Streamlit's specific title elements if necessary */
+.stTitle {
+    font-size: 1.25rem !important;
+}
+.stSubheader {
+    font-size: 0.9rem !important;
+}
+
+/* Elegant Metric Cards */
+
+div[data-testid="stMetricValue"] {
+  color: var(--text-color) !important;
+}
+/* This often collapses to 0 height on narrow screens */
+div[data-testid="stMetric"] {
+  height: 100px; /* or font-size: 3rem */
+  overflow: hidden;
+}
+div[data-testid="stMetric"] {
+    font-size: 0.875rem !important;
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;            
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+div[data-testid="stMetric"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+}
+
+/* Add a subtle visual distinction for the caption texts below metrics */
+div[data-testid="stCaptionContainer"], 
+div[data-testid="stMarkdownContainer"] p small {
+    font-size: 1.0rem !important;
+    padding-left: 8px;
+    font-style: italic;
+    color: #04234e !important;
+}
+
+/* Prevent metric values from truncating with ... */
+div[data-testid="stMetricValue"], 
+div[data-testid="stMetricValue"] > div {
+    font-size: 1.5rem !important; /* Slightly smaller to fit large numbers */
+    white-space: normal !important; /* Allow wrapping if absolutely necessary */
+    word-wrap: break-word !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+}

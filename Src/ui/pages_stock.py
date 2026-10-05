@@ -15,6 +15,8 @@ def get_engine():
 
 
 def show_stock_position():
+    from ui.style_loader import load_css
+    load_css()
     st.title("📦 Stock Position Report")
     
     engine = get_engine()

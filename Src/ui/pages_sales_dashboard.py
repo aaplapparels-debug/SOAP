@@ -120,7 +120,10 @@ def fetch_performance_data(engine, financial_year=None):
 
 
 def show_sales_dashboard():
+    from ui.style_loader import load_css
+    load_css()
     st.title("📊 Sales Performance & Dashboard")
+    
 
     engine = get_engine()
 

@@ -54,6 +54,8 @@ def get_customers(engine):
 
 
 def show_sales_360():
+    from ui.style_loader import load_css
+    load_css()
     st.title("🔄 Sales 360° Customer & Item Intelligence")
 
     engine = get_engine()
@@ -284,7 +286,7 @@ def show_sales_360():
                         f"""
                         <div style="border: 2px solid #dc3545; background-color: #fff5f5; border-radius: 6px; padding: 4px; text-align: center;">
                             <div style="color: #dc3545; font-size: 11px; font-weight: 700;">⚠️ PORTFOLIO OVERDUE</div>
-                            <div style="background-color: #dc3545; color: white; font-size: 10px; font-weight: 700; border-radius: 3px; padding: 1px 4px; margin-top: 2px;">
+                            <div style="background-color: #dc3545; color: white; font-size: 12px; font-weight: 700; border-radius: 3px; padding: 1px 4px; margin-top: 2px;">
                                 {format_inr(overdue_90_val)} > 90D
                             </div>
                         </div>
@@ -408,8 +410,8 @@ def show_sales_360():
                 format_inr(receipts_val),
                 delta=f"{collection_eff:.1f}% of Sales",
             )
-            st.caption(curr_start)  
-            st.caption(f"Sales: {format_inr(curr_total_val)}")
+            #st.caption(curr_start)  
+            #st.caption(f"Sales: {format_inr(curr_total_val)}")
         with a6:
             total_due = out_df["pending_amount"].sum()
             st.metric("Total Outstanding", format_inr(total_due))

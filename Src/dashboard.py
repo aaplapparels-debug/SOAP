@@ -5,14 +5,14 @@ Main entry point with Google OAuth, Mobile-First Action Hub, and Page Routing.
 
 from datetime import date
 import secrets
-from config_loader import load_config
+from config_loader import load_ui_config
 from google_auth_oauthlib.flow import Flow
-from pages_delivery_dashboard import show_delivery_dashboard
-from pages_executive import show_executive_dashboard
-from pages_outstanding import show_outstanding_report
-from pages_sales360 import show_sales_360
-from pages_sales_dashboard import show_sales_dashboard
-from pages_stock import show_stock_position
+from ui.pages_delivery_dashboard import show_delivery_dashboard
+from ui.pages_executive import show_executive_dashboard
+from ui.pages_outstanding import show_outstanding_report
+from ui.pages_sales360 import show_sales_360
+from ui.pages_sales_dashboard import show_sales_dashboard
+from ui.pages_stock import show_stock_position
 import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
@@ -26,7 +26,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-config = load_config()
+config = load_ui_config()
 dashboard_cfg = config["dashboard"]
 SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
@@ -177,6 +177,8 @@ def get_user_role(email: str):
 # 3. MOBILE-OPTIMIZED HOME PAGE
 # =====================================================================
 def show_home():
+    from ui.style_loader import load_css
+    load_css()
     # --- Inject Mobile-First Responsive CSS ---
     st.markdown(
         """
@@ -385,18 +387,6 @@ if not st.session_state.user_email:
 # 5. AUTHENTICATED NAVIGATION GATE
 # =====================================================================
 else:
-    top_col1, top_col2 = st.columns([5, 1])
-    with top_col1:
-        st.caption(
-            f"👤 **{st.session_state.user_email}** | Role:"
-            f" **{st.session_state.user_role}**"
-        )
-    with top_col2:
-        if st.button("🚪 Logout"):
-            st.session_state.user_email = None
-            st.session_state.user_role = None
-            st.rerun()
-
     # Define Navigation Pages
     page_home = st.Page(show_home, title="Home", icon="🏠", default=True)
     page_outstanding = st.Page(
@@ -427,4 +417,18 @@ else:
     ]
 
     pg = st.navigation(pages, position="sidebar", expanded=True)
+
+    with st.sidebar:
+        st.markdown("---")
+        st.caption(
+            f"👤 **{st.session_state.user_email}**\n\nRole:"
+            f" **{st.session_state.user_role}**"
+        )
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state.user_email = None
+            st.session_state.user_role = None
+            st.rerun()
+        elif st.button("🔄 Refresh Metrics", use_container_width=True):
+            st.rerun()
+
     pg.run()

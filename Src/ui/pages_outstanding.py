@@ -58,6 +58,8 @@ def get_customer_list(engine):
 
 
 def show_outstanding_report():
+    from ui.style_loader import load_css
+    load_css()
     st.title("📋 Outstanding Debtors Report")
 
     engine = get_engine()
@@ -192,7 +194,7 @@ def show_outstanding_report():
             df["days_outstanding"], errors="coerce"
         ).fillna(0)
 
-        total_outstanding = df["pending_amount"].sum()
+        total_outstanding = df["pending_amount"].sum() + pdc_total
         if total_outstanding > 0:
             credit_days = (
                 ((total_outstanding+ pdc_total) * days_passed)/net_sales
@@ -223,9 +225,9 @@ def show_outstanding_report():
                 st.subheader("Receivables Overview")
                 m_row1_col1, m_row1_col2 = st.columns(2)
                 with m_row1_col1:
-                    st.metric("Total Outstanding", format_inr(total_outstanding))
-                    st.caption(f"And **₹{pdc_total:,.0f}** in post-dated cheques (PDCs) received.")
-                    st.metric("Number of Customers", f"{df['customer_name'].nunique():,}")
+                    st.metric("Total Outstanding", format_inr(total_outstanding),delta=f"₹{pdc_total:,.0f} in PDCs")
+                    #st.caption(f" and **₹{pdc_total:,.0f}** in post-dated cheques (PDCs) received.")
+                    
                 with m_row1_col2:
                     st.metric("Number of Invoices", f"{len(df):,}")
                     st.metric("Credit Utilization Days", f"{credit_days:.0f} days")
@@ -338,13 +340,21 @@ def show_outstanding_report():
             )
 
             st.subheader("Post-Dated Cheques (PDCs) Received")
+            
+            # Format cheque_date and amount for display
+            if not pdc_df.empty:
+                pdc_df["cheque_date"] = pd.to_datetime(pdc_df["cheque_date"]).dt.strftime("%Y-%m-%d")
+                pdc_df["formatted_amount"] = pdc_df["amount"].apply(lambda x: f"₹{x:,.2f}")
+            else:
+                pdc_df["formatted_amount"] = []
+                
             st.dataframe(
                 pdc_df[
                     [
                         "customer_name",
                         "cheque_no",
                         "bank",
-                        "amount",
+                        "formatted_amount",
                         "cheque_date",
                         "division",
                     ]
@@ -353,11 +363,11 @@ def show_outstanding_report():
                 hide_index=True,
                 column_config={
                     "customer_name": st.column_config.TextColumn("Customer"),
-                    "cheque_no": st.column_config.TextColumn("cheque_no"),
-                    "bank": st.column_config.TextColumn("bank"),
-                    "amount": st.column_config.TextColumn("amount"),
-                    "cheque_date": st.column_config.TextColumn("cheque_date"),
-                    "division": st.column_config.TextColumn("division"),
+                    "cheque_no": st.column_config.TextColumn("Cheque No"),
+                    "bank": st.column_config.TextColumn("Bank"),
+                    "formatted_amount": st.column_config.TextColumn("Amount"),
+                    "cheque_date": st.column_config.TextColumn("Cheque Date"),
+                    "division": st.column_config.TextColumn("Division"),
                 }
             )
             
