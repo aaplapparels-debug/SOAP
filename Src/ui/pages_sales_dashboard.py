@@ -7,10 +7,7 @@ from config_loader import load_config
 from sqlalchemy import create_engine, text
 
 
-@st.cache_resource
-def get_engine():
-    config = load_config()
-    return create_engine(config["postgres"]["connection_string"])
+from ui.db_helper import get_engine
 
 
 def format_inr(val, decimals=2):

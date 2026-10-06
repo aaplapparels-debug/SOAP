@@ -34,11 +34,7 @@ SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 # =====================================================================
 # 1. DATABASE & LIVE METRICS ENGINE
 # =====================================================================
-@st.cache_resource
-def get_engine():
-    return create_engine(
-        config["postgres"]["connection_string"], poolclass=NullPool
-    )
+from ui.db_helper import get_engine
 
 
 def format_inr(val):

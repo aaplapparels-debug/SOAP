@@ -8,10 +8,7 @@ from sqlalchemy import create_engine, text
 from config_loader import load_config
 import io
 
-@st.cache_resource
-def get_engine():
-    config = load_config()
-    return create_engine(config["postgres"]["connection_string"])
+from ui.db_helper import get_engine
 
 
 def show_stock_position():

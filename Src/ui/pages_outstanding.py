@@ -16,10 +16,7 @@ fy_start_date = datetime.date(fy_start_year, 4, 1)
 days_passed = (today - fy_start_date).days + 1
 
 
-@st.cache_resource
-def get_engine():
-    config = load_config()
-    return create_engine(config["postgres"]["connection_string"])
+from ui.db_helper import get_engine
 
 
 def format_inr(number):

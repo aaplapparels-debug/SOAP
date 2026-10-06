@@ -8,13 +8,7 @@ from sqlalchemy.pool import NullPool
 import streamlit as st
 
 
-@st.cache_resource
-def get_engine():
-    config = load_config()
-    # NullPool prevents poisoned connection states across Streamlit Cloud reruns
-    return create_engine(
-        config["postgres"]["connection_string"], poolclass=NullPool
-    )
+from ui.db_helper import get_engine
 
 
 def format_inr(val):
