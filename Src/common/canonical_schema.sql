@@ -23,6 +23,9 @@
 CREATE TABLE IF NOT EXISTS customers (
     customer_code   VARCHAR(50),
     customer_name   VARCHAR(255),
+    phone           VARCHAR(30),        -- Pulled from staging
+    email           VARCHAR(150),       -- Pulled from staging
+    salesperson     VARCHAR(100),       -- Pulled from staging
     credit_days     INTEGER,
     credit_limit    NUMERIC(14, 2),
     credit_used     NUMERIC(14, 2),
@@ -30,7 +33,6 @@ CREATE TABLE IF NOT EXISTS customers (
     source_system   VARCHAR(20),
     PRIMARY KEY (customer_code, division, source_system)
 );
-
 CREATE TABLE IF NOT EXISTS items (
     item_code       VARCHAR(50),
     item_desc       VARCHAR(255),
@@ -271,4 +273,67 @@ CREATE TABLE IF NOT EXISTS  delivery_status_history (
     remarks TEXT,
     changed_by VARCHAR(128),
     changed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 1. Blanket & Party-specific Bucket Cadence
+CREATE TABLE IF NOT EXISTS followup_bucket_config (
+    id SERIAL PRIMARY KEY,
+    scope VARCHAR(20) NOT NULL DEFAULT 'GLOBAL', -- 'GLOBAL' or 'PARTY'
+    party_name VARCHAR(255),                     -- NULL if scope = 'GLOBAL'
+    min_days INT NOT NULL,
+    max_days INT,                                -- NULL indicates infinity (e.g., 31+)
+    bucket_label VARCHAR(50) NOT NULL,
+    severity_level VARCHAR(20) NOT NULL,         -- 'REMINDER', 'OVERDUE', 'URGENT', 'CRITICAL'
+    channel VARCHAR(30) NOT NULL,                -- 'WHATSAPP', 'EMAIL', 'MANUAL_CALL'
+    cooldown_days INT NOT NULL DEFAULT 3,
+    is_active BOOLEAN DEFAULT TRUE,
+    CONSTRAINT uq_bucket_scope UNIQUE (scope, party_name, min_days)
+);
+
+-- Seed Default Global Buckets
+INSERT INTO followup_bucket_config (scope, min_days, max_days, bucket_label, severity_level, channel, cooldown_days)
+VALUES 
+    ('GLOBAL', 0, 3, 'Grace Period', 'REMINDER', 'WHATSAPP', 3),
+    ('GLOBAL', 4, 15, 'Bucket 1 (Mild)', 'OVERDUE', 'WHATSAPP', 5),
+    ('GLOBAL', 16, 30, 'Bucket 2 (Firm)', 'URGENT', 'WHATSAPP', 3),
+    ('GLOBAL', 31, NULL, 'Bucket 3 (Critical)', 'CRITICAL', 'MANUAL_CALL', 7)
+ON CONFLICT DO NOTHING;
+
+-- 2. Ignore / Exclusion Register (Protects parties or specific disputed bills)
+CREATE TABLE IF NOT EXISTS followup_exclusions (
+    id SERIAL PRIMARY KEY,
+    party_name VARCHAR(255),
+    bill_ref VARCHAR(100),
+    exclusion_reason VARCHAR(100) NOT NULL,      -- 'DISPUTED', 'MANAGEMENT_HOLD', 'LEGAL'
+    valid_until DATE,                            -- NULL = permanent
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3. Cadence State Tracker (Per customer)
+CREATE TABLE IF NOT EXISTS party_followup_state (
+    customer_name VARCHAR(255) PRIMARY KEY,
+    last_contacted_at TIMESTAMP WITH TIME ZONE,
+    current_bucket VARCHAR(50),
+    active_promise_date DATE,
+    snooze_until DATE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4. Follow-up Action Logs / Queue
+CREATE TABLE IF NOT EXISTS customer_followup_logs (
+    id SERIAL PRIMARY KEY,
+    customer_name VARCHAR(255) NOT NULL,
+    phone VARCHAR(30),
+    email VARCHAR(150),
+    bill_ref VARCHAR(100),
+    followup_type VARCHAR(50) NOT NULL,
+    severity_level VARCHAR(20) NOT NULL,
+    total_outstanding NUMERIC(14, 2) NOT NULL,
+    overdue_amount NUMERIC(14, 2) NOT NULL,
+    overdue_days INT NOT NULL,
+    promised_pay_date DATE,
+    notes TEXT,
+    salesperson VARCHAR(100),
+    status VARCHAR(50) DEFAULT 'PENDING',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
