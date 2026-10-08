@@ -13,7 +13,7 @@ from ui.pages_outstanding import show_outstanding_report
 from ui.pages_sales360 import show_sales_360
 from ui.pages_sales_dashboard import show_sales_dashboard
 from ui.pages_stock import show_stock_position
-from ui.pages_scheduler_settings import render_scheduler_config_tab
+from ui.pages_scheduler_settings import render_scheduler_settings
 import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
@@ -403,7 +403,7 @@ else:
         show_delivery_dashboard, title="Delivery Dashboard", icon="🚚"
     )
     page_scheduler = st.Page(
-        render_scheduler_config_tab, title="Scheduler Settings", icon="⚙️"
+        render_scheduler_settings, title="Scheduler Settings", icon="⚙️"
     )
 
     pages = [
