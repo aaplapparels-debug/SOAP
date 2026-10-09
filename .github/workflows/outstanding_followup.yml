@@ -1,0 +1,36 @@
+name: Run Outstanding Follow-up Scheduler
+
+on:
+  schedule:
+    # 04:30 UTC = 10:00 AM IST daily
+    - cron: '30 4 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI for testing
+
+jobs:
+  run-followup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Execute Outstanding Scheduler
+        env:
+          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+        run: |
+          python Src/common/outstanding_scheduler.py

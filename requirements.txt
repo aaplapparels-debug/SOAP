@@ -7,6 +7,7 @@ pyodbc
 
 # Postgres access (canonical schema / Neon)
 psycopg2-binary
+psycopg[binary]
 pg8000
 SQLAlchemy
 

@@ -13,6 +13,7 @@ from ui.pages_outstanding import show_outstanding_report
 from ui.pages_sales360 import show_sales_360
 from ui.pages_sales_dashboard import show_sales_dashboard
 from ui.pages_stock import show_stock_position
+from ui.pages_scheduler_settings import render_scheduler_settings
 import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
@@ -401,6 +402,9 @@ else:
     page_delivery = st.Page(
         show_delivery_dashboard, title="Delivery Dashboard", icon="🚚"
     )
+    page_scheduler = st.Page(
+        render_scheduler_settings, title="Scheduler Settings", icon="⚙️"
+    )
 
     pages = [
         page_home,
@@ -410,6 +414,7 @@ else:
         page_stock,
         page_sales360,
         page_delivery,
+        page_scheduler,
     ]
 
     pg = st.navigation(pages, position="sidebar", expanded=True)
