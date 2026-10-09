@@ -33,7 +33,7 @@ import re
 from datetime import datetime
 import pyodbc
 
-from config_loader import load_config
+from shoper_config import load_shoper_config as load_config
 
 def _parse_backup_timestamp(filepath: str) -> datetime:
     """Extracts backup generation timestamp from filename patterns like 'A_62X_260828_1200_C'.
@@ -187,9 +187,37 @@ def wait_for_database_online(sql_cfg: dict, staging_db: str, timeout_seconds: in
         f"{staging_db} did not reach ONLINE within {timeout_seconds}s (last state: {state})"
     )
 
+def db_recovery_state(sql_cfg: dict, staging_db: str) -> str:
+    """Returns the current recovery state of the specified database."""
+    conn_str = (
+        "DRIVER={ODBC Driver 18 for SQL Server};"
+        f"SERVER={sql_cfg['host']};"
+        f"UID={sql_cfg['sa_username']};PWD={sql_cfg['sa_password']};"
+        "TrustServerCertificate=yes;"
+    )
+    conn = pyodbc.connect(conn_str, autocommit=True)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(f"USE {staging_db};")
+        cursor.execute(f"ALTER DATABASE {staging_db} SET RECOVERY SIMPLE;")
+        print(f"Successfully set recovery model to SIMPLE for {staging_db}.")
+        query_log_name=f"""SELECT name FROM sys.master_files WHERE database_id = DB_ID('{staging_db}') AND type_desc = 'LOG'"""
+        cursor.execute(query_log_name)
+        log_file_name = cursor.fetchone()[0]
+        shrink_log_sql = f"DBCC SHRINKFILE('{log_file_name}', 1024);"
+        cursor.execute(shrink_log_sql)
+        print(f"Successfully shrunk log file for {staging_db}.")
+    
+    except Exception as e:
+        print(f"Error occurred while setting recovery model for {staging_db}: {e}") 
+
+    finally:
+        cursor.close()
+        conn.close()
 
 def run_nightly_restore():
-    config = load_config()
+    config = load_shoper_config()
     watch_folder = config["backup"]["watch_folder"]
     temp_folder = config["backup"]["temp_extract_folder"]
     sql_cfg = config["sql_server"]
@@ -215,6 +243,9 @@ def run_nightly_restore():
             wait_for_database_online(sql_cfg, division["staging_db"])
             print(f"{division['staging_db']} is ONLINE")
 
+            db_recovery_state(sql_cfg, division["staging_db"])
+            print(f"Recovery model set to SIMPLE and log file shrunk for {division['staging_db']}.")
+            
             # Clean up both the extracted files and the staged copy --
             # only on success, so a failed run leaves everything in
             # place for inspection.

@@ -42,12 +42,13 @@ guess made now.
 """
 
 import datetime
+import os
 
 import pandas as pd
 from sqlalchemy import create_engine, text
 from typing import Optional
 
-from config_loader import load_config
+from shoper_config import load_shoper_config
 from shoper_adapter import ShoperAdapter, DivisionConfig
 
 
@@ -55,9 +56,23 @@ def get_engine(connection_string: str):
     return create_engine(connection_string)
 
 
-def apply_schema(engine, schema_file: str = "canonical_schema.sql"):
+def apply_schema(engine, schema_file: str = None):
     """Runs canonical_schema.sql against the database -- safe to run
     every time, since every CREATE TABLE uses IF NOT EXISTS."""
+    if schema_file is None:
+        candidates = [
+            os.path.join(os.path.dirname(__file__), "..", "common", "canonical_schema.sql"),
+            os.path.join(".", "common", "canonical_schema.sql"),
+            os.path.join("Src", "common", "canonical_schema.sql"),
+            "canonical_schema.sql",
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                schema_file = c
+                break
+        if schema_file is None:
+            schema_file = "canonical_schema.sql"
+
     with open(schema_file, "r") as f:
         schema_sql = f.read()
     with engine.begin() as conn:
@@ -159,7 +174,7 @@ def sync_append_only_table(
 
 
 def run_load():
-    config = load_config()
+    config = load_shoper_config()
     sql_cfg = config["sql_server"]
     pg_connection_string = config["postgres"]["connection_string"]
 
