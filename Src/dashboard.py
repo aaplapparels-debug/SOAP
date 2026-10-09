@@ -14,6 +14,7 @@ from ui.pages_sales360 import show_sales_360
 from ui.pages_sales_dashboard import show_sales_dashboard
 from ui.pages_stock import show_stock_position
 from ui.pages_scheduler_settings import render_scheduler_settings
+from ui.pages_followup_queue import render_followup_queue
 import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
@@ -405,10 +406,14 @@ else:
     page_scheduler = st.Page(
         render_scheduler_settings, title="Scheduler Settings", icon="⚙️"
     )
+    page_followup_queue = st.Page(
+        render_followup_queue, title="Follow-up Queue", icon="📲"
+    )
 
     pages = [
         page_home,
         page_outstanding,
+        page_followup_queue,
         page_sales,
         page_exec,
         page_stock,
