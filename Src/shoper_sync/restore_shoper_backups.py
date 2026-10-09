@@ -33,7 +33,7 @@ import re
 from datetime import datetime
 import pyodbc
 
-from shoper_config import load_shoper_config as load_config
+from shoper_config import load_shoper_config
 
 def _parse_backup_timestamp(filepath: str) -> datetime:
     """Extracts backup generation timestamp from filename patterns like 'A_62X_260828_1200_C'.

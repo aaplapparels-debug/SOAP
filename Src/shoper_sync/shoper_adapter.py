@@ -179,7 +179,7 @@ class ShoperAdapter:
         query = f"""
             SELECT h.DocDt AS sale_date, h.CustCd AS customer_code,
                    d.StockNo AS item_code, h.SaleTrnType AS trn_type,
-                   CASE h.SaleTrnType WHEN 2100 THEN 1 WHEN 1300 THEN -1 WHEN 1600 THEN -1END AS sign_multiplier,
+                   CASE h.SaleTrnType WHEN 2100 THEN 1 WHEN 1300 THEN -1 WHEN 1600 THEN -1 END AS sign_multiplier,
                    d.DocQty AS qty, d.StkUpdtRate AS rate,
                    d.DocEntNetValue AS net_value,
                    h.DocNoPrefix AS doc_prefix, h.DocNo AS doc_no, 'shoper' AS source_system
