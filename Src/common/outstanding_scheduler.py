@@ -125,10 +125,10 @@ def run_scheduler():
         pfs.snooze_until
     FROM outstanding_debtors o
     LEFT JOIN (
-        SELECT DISTINCT ON (customer_name) customer_name, phone, email, salesperson
+        SELECT DISTINCT ON (customer_name) customer_name,customer_code, phone, email, salesperson
         FROM customers
         WHERE phone IS NOT NULL OR email IS NOT NULL
-    ) c ON o.customer_name = c.customer_name
+    ) c ON TRIM(SPLIT_PART(o.customer_name, '_', 1)) = c.customer_code
     LEFT JOIN delivery_holds dh ON o.invoice_reference = dh.doc_no
     LEFT JOIN active_exclusions ae_p ON o.customer_name = ae_p.party_name AND ae_p.bill_ref IS NULL
     LEFT JOIN active_exclusions ae_b ON o.invoice_reference = ae_b.bill_ref
@@ -139,10 +139,16 @@ def run_scheduler():
 
     df_debtors = pd.read_sql(query, engine)
 
+    #sys.stdout.write("\n=== RAW SQL RESULT CHECK ===\n")
+    #sys.stdout.write(df_debtors[["customer_name", "phone", "email"]].to_string() + "\n")
+    #sys.stdout.write("=============================\n")
+    #sys.stdout.flush()    
+    
     # Aggregate by customer
     parties = {}
     for _, r in df_debtors.iterrows():
         party = r["customer_name"]
+        
         if party not in parties:
             parties[party] = {
                 "bills": [],
@@ -154,6 +160,7 @@ def run_scheduler():
                 "promise_date": r["active_promise_date"],
                 "snooze_until": r["snooze_until"],
             }
+
         
         # Only attach bill if not on dispatch hold or specifically excluded
         if not r["is_delivery_held"] and not r["is_bill_excluded"]:
@@ -177,7 +184,7 @@ def run_scheduler():
                 continue
             if not data["bills"]:
                 continue
-
+    
             total_overdue = sum(b["pending"] for b in data["bills"])
             max_days = max(b["overdue_days"] for b in data["bills"])
             bill_refs = ", ".join([b["ref"] for b in data["bills"][:5]])
@@ -215,7 +222,8 @@ def run_scheduler():
                     dispatched_count += 1
 
             task_status = "SENT" if was_sent else "PENDING"
-
+            sys.stdout.write(f"Processing party: {party},{data['phone']},{data['email']}\n")  
+            sys.stdout.flush()
             # Insert execution log
             conn.execute(
                 text("""
