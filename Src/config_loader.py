@@ -42,6 +42,17 @@ def load_config() -> dict:
     )
     if env_conn:
         return {"postgres": {"connection_string": env_conn}}
+    
+    # 4. Discrete Component Fallback (GitHub Actions / CI runner)
+    host = os.environ.get("POSTGRES_HOST")
+    user = os.environ.get("POSTGRES_USER")
+    pwd = os.environ.get("POSTGRES_PASSWORD")
+    db = os.environ.get("POSTGRES_DB")
+    port = os.environ.get("POSTGRES_PORT", "5432")
+
+    if host and user and pwd and db:
+        conn_str = f"postgresql+pg8000://{user}:{pwd}@{host}:{port}/{db}"
+        return {"postgres": {"connection_string": conn_str}}
 
     raise RuntimeError(
         f"Database credentials missing. Checked Streamlit Secrets and config.{env}.yaml."
