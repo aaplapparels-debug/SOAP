@@ -169,6 +169,7 @@ def run_scheduler():
             parties[party]["bills"].append({
                 "ref": r["bill_ref"],
                 "pending": float(r["pending_amount"]),
+                "inv_date": inv_dt_str,
                 "overdue_days": int(r["overdue_days"])
             })
 
