@@ -112,6 +112,7 @@ def run_scheduler():
     SELECT 
         o.customer_name,
         o.invoice_reference AS bill_ref,
+        o.invoice_date,
         o.pending_amount,
         (CURRENT_DATE - o.invoice_date) AS overdue_days,
         c.phone,
@@ -147,8 +148,8 @@ def run_scheduler():
     # Aggregate by customer
     parties = {}
     for _, r in df_debtors.iterrows():
-        party = r["customer_name"]
-        
+        party = r["customer_name"]       
+      
         if party not in parties:
             parties[party] = {
                 "bills": [],
@@ -164,6 +165,7 @@ def run_scheduler():
         
         # Only attach bill if not on dispatch hold or specifically excluded
         if not r["is_delivery_held"] and not r["is_bill_excluded"]:
+            inv_dt_str = pd.to_datetime(r["invoice_date"]).strftime("%d-%b-%Y") if pd.notna(r["invoice_date"]) else "N/A"
             parties[party]["bills"].append({
                 "ref": r["bill_ref"],
                 "pending": float(r["pending_amount"]),
@@ -175,7 +177,7 @@ def run_scheduler():
 
     with engine.begin() as conn:
         for party, data in parties.items():
-            data.sort(key=lambda x: x["overdue_days"], reverse=True)  # Sort bills by overdue days descending
+            
             # Evaluation filters & guardrails
             if data["party_excluded"]:
                 continue
@@ -185,10 +187,27 @@ def run_scheduler():
                 continue
             if not data["bills"]:
                 continue
-    
+            
+            # Sort the bills list descending by overdue_days
+            data["bills"].sort(key=lambda x: x["overdue_days"], reverse=True)
+            
             total_overdue = sum(b["pending"] for b in data["bills"])
             max_days = max(b["overdue_days"] for b in data["bills"])
-            bill_refs = ", ".join([b["ref"] + f" (₹{b['pending']:,.2f})"+f"({b['overdue_days']} days)" for b in data["bills"][:5]])
+                        
+            # Format Bill Reference List:
+            # If 90+ days: list ALL bills that are >= 90 days
+            # Otherwise: top 5 highest overdue bills
+            if max_days >= 90:
+                target_bills = [b for b in data["bills"] if b["overdue_days"] >= 90]
+            else:
+                target_bills = data["bills"][:5]
+
+            # Format: REF (Dt: 15-May-2024, ₹5,443.00, 112 days)
+            bill_items = [
+                f"{b['ref']} (Dt: {b['inv_date']}, ₹{b['pending']:,.2f}, {b['overdue_days']} days)"
+                for b in target_bills
+            ]
+            bill_refs = ", ".join(bill_items)
 
             bucket = resolve_bucket(max_days, party, global_buckets, party_buckets)
             if not bucket:
