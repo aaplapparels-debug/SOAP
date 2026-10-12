@@ -205,7 +205,7 @@ def run_scheduler():
 
             # Format: REF (Dt: 15-May-2024, ₹5,443.00, 112 days)
             bill_items = [
-                f"{b['ref']} (Dt: {b['inv_date']}, ₹{b['pending']:,.2f}, {b['overdue_days']} days)"
+                f"{b['ref']} (Dt: {b['inv_date']}, ₹{b['pending']:,.2f}, {b['overdue_days']} days)\n"
                 for b in target_bills
             ]
             bill_refs = ", ".join(bill_items)
