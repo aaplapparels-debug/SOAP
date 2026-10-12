@@ -2,7 +2,6 @@
 AAPL Sales & Operations Automation Portal (SOAP)
 Main entry point with Google OAuth, Mobile-First Action Hub, and Page Routing.
 """
-
 from datetime import date
 import secrets
 from config_loader import load_ui_config
@@ -413,13 +412,13 @@ else:
     pages = [
         page_home,
         page_outstanding,
-        page_followup_queue,
         page_sales,
         page_exec,
         page_stock,
         page_sales360,
         page_delivery,
         page_scheduler,
+        page_followup_queue,
     ]
 
     pg = st.navigation(pages, position="sidebar", expanded=True)

@@ -37,7 +37,10 @@ def build_whatsapp_url(phone: str, message: str) -> str:
 
 
 def render_followup_queue():
-    st.title("📋 Outstanding Follow-up Queue")
+
+    from ui.style_loader import load_css
+    load_css()
+    st.title("📋 Follow-up Queue")
     st.caption("Review pending debtor notices and launch WhatsApp chats individually or in batch.")
 
     engine = get_engine()

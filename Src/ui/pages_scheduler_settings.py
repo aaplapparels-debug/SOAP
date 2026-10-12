@@ -59,8 +59,20 @@ def trigger_workflow(repo: str, token: str, workflow_file: str, branch: str = "m
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json"
     }
-    res = requests.post(url, headers=headers, json={"ref": branch})
-    return res.status_code == 204
+    payload = {"ref": branch}
+
+    print(f"\n[DEBUG] Dispatching to: {url}")
+    print(f"[DEBUG] Branch: {branch}")
+    
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        print(f"[DEBUG] GitHub Status Code: {res.status_code}")
+        print(f"[DEBUG] GitHub Response Text: {res.text}\n")
+        return res.status_code == 204, res.status_code, res.text
+    except Exception as e:
+        print(f"[DEBUG] Request Exception: {e}\n")
+        return False, 0, str(e)
+
 
 
 # ==========================================
@@ -68,7 +80,10 @@ def trigger_workflow(repo: str, token: str, workflow_file: str, branch: str = "m
 # ==========================================
 
 def render_scheduler_settings():
-    st.title("⚙️ Outstanding Follow-up Engine Settings")
+
+    from ui.style_loader import load_css
+    load_css()
+    st.title("⚙️ Follow-up Engine Settings")
 
     engine = get_engine()
 
@@ -284,7 +299,8 @@ def render_scheduler_settings():
         with c_btn2:
             if st.button("⚡ Trigger Scheduler Run Now"):
                 with st.spinner("Dispatching GitHub Action..."):
-                    if trigger_workflow(repo, token, "outstanding_followup.yml", branch):
+                    ok, status_code, response_body = trigger_workflow(repo, token, "outstanding_followup.yml", branch)
+                    if ok:
                         st.success("GitHub Action triggered! Check your Actions tab.")
                     else:
-                        st.error("Workflow trigger failed.")
+                        st.error(f"GitHub returned HTTP {status_code}: {response_body}")

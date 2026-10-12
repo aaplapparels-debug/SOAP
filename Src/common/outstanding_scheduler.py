@@ -175,6 +175,7 @@ def run_scheduler():
 
     with engine.begin() as conn:
         for party, data in parties.items():
+            data.sort(key=lambda x: x["overdue_days"], reverse=True)  # Sort bills by overdue days descending
             # Evaluation filters & guardrails
             if data["party_excluded"]:
                 continue
@@ -187,7 +188,7 @@ def run_scheduler():
     
             total_overdue = sum(b["pending"] for b in data["bills"])
             max_days = max(b["overdue_days"] for b in data["bills"])
-            bill_refs = ", ".join([b["ref"] for b in data["bills"][:5]])
+            bill_refs = ", ".join([b["ref"] + f" (₹{b['pending']:,.2f})"+f"({b['overdue_days']} days)" for b in data["bills"][:5]])
 
             bucket = resolve_bucket(max_days, party, global_buckets, party_buckets)
             if not bucket:
@@ -222,8 +223,8 @@ def run_scheduler():
                     dispatched_count += 1
 
             task_status = "SENT" if was_sent else "PENDING"
-            sys.stdout.write(f"Processing party: {party},{data['phone']},{data['email']}\n")  
-            sys.stdout.flush()
+            #sys.stdout.write(f"Processing party: {party},{data['phone']},{data['email']}\n")  
+            #sys.stdout.flush()
             # Insert execution log
             conn.execute(
                 text("""

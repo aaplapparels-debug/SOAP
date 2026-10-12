@@ -290,14 +290,6 @@ CREATE TABLE IF NOT EXISTS followup_bucket_config (
     CONSTRAINT uq_bucket_scope UNIQUE (scope, party_name, min_days)
 );
 
--- Seed Default Global Buckets
-INSERT INTO followup_bucket_config (scope, min_days, max_days, bucket_label, severity_level, channel, cooldown_days)
-VALUES 
-    ('GLOBAL', 0, 3, 'Grace Period', 'REMINDER', 'WHATSAPP', 3),
-    ('GLOBAL', 4, 15, 'Bucket 1 (Mild)', 'OVERDUE', 'WHATSAPP', 5),
-    ('GLOBAL', 16, 30, 'Bucket 2 (Firm)', 'URGENT', 'WHATSAPP', 3),
-    ('GLOBAL', 31, NULL, 'Bucket 3 (Critical)', 'CRITICAL', 'MANUAL_CALL', 7)
-ON CONFLICT DO NOTHING;
 
 -- 2. Ignore / Exclusion Register (Protects parties or specific disputed bills)
 CREATE TABLE IF NOT EXISTS followup_exclusions (
