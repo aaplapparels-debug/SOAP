@@ -143,10 +143,45 @@ class ShoperAdapter:
 
     def extract_customers(self) -> pd.DataFrame:
         query = """
-            SELECT Code AS customer_code, Nm AS customer_name,
-                   CreditDays AS credit_days, CreditLimit AS credit_limit,
-                   CreditUsed AS credit_used, 'shoper' AS source_system
-            FROM Customers
+        WITH RankedContacts AS (
+            SELECT 
+                e.CatCd,
+                NULLIF(NULLIF(LTRIM(RTRIM(e.MobilePhone)), 'NA'), '') AS MobilePhone,
+                NULLIF(NULLIF(LTRIM(RTRIM(e.Email)), 'NA'), '') AS Email,
+                ROW_NUMBER() OVER (
+                PARTITION BY e.CatCd 
+                ORDER BY 
+                -- Prioritize rows with actual phone numbers
+                CASE 
+                    WHEN e.MobilePhone IS NOT NULL 
+                         AND LTRIM(RTRIM(e.MobilePhone)) NOT IN ('', 'NA', '0', 'None', 'null') 
+                    THEN 1 
+                    ELSE 2 
+                END,
+                -- Prioritize rows with actual emails
+                CASE 
+                    WHEN e.Email IS NOT NULL 
+                         AND LTRIM(RTRIM(e.Email)) NOT IN ('', 'NA', 'None', 'null') 
+                    THEN 1 
+                    ELSE 2 
+                END
+                )AS rn
+                FROM ExtdMailingList e
+                WHERE e.CatType IN ('C', 'CU')
+            )
+            SELECT 
+            LTRIM(RTRIM(c.Code)) AS customer_code,
+            LTRIM(RTRIM(c.Nm)) AS customer_name,
+            ISNULL(c.CreditDays, 0) AS credit_days,
+            ISNULL(c.CreditLimit, 0.0) AS credit_limit,
+            ISNULL(c.CreditUsed, 0.0) AS credit_used,
+            'shoper' AS source_system,
+            rc.MobilePhone AS phone,
+            rc.Email AS email
+            FROM Customers c
+            LEFT JOIN RankedContacts rc 
+            ON c.Code = rc.CatCd 
+            AND rc.rn = 1;
         """
         return self._run_for_all_divisions(query)
 
