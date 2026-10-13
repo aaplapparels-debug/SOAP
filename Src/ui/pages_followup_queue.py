@@ -10,11 +10,75 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from sqlalchemy import text
+import os
+import time
+import urllib.parse
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+
 
 try:
     from ui.db_helper import get_engine
 except ImportError:
     from db_helper import get_engine
+
+
+def dispatch_whatsapp_via_selenium(tasks: list) -> list:
+    """
+    Opens Chrome with persistent profile, loops through selected tasks, 
+    and automatically presses Enter to send each WhatsApp message.
+    """
+    options = Options()
+    options.add_argument(r'--user-data-dir=C:\WhatsAppSeleniumProfile')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-gpu')
+    options.add_experimental_option("detach", True)
+
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=options
+    )
+
+    sent_ids = []
+
+    try:
+        for item in tasks:
+            phone = item["phone"]
+            msg = item["message"]
+            encoded_message = urllib.parse.quote(msg)
+            url = f"https://web.whatsapp.com/send?phone={phone}&text={encoded_message}"
+
+            driver.get(url)
+            
+            # Wait for message box to become clickable
+            try:
+                message_box = WebDriverWait(driver, 35).until(
+                    EC.presence_of_element_located((
+                        By.XPATH,
+                        '//footer//div[@contenteditable="true"]'
+                    ))
+                )
+                time.sleep(2)
+                message_box.click()
+                time.sleep(1)
+                message_box.send_keys(Keys.ENTER)
+                time.sleep(3)  # Buffer to allow WhatsApp to transmit
+                
+                sent_ids.append(item["id"])
+            except Exception as ex:
+                st.warning(f"Could not deliver to {item['customer']}: {ex}")
+
+    finally:
+        driver.quit()
+
+    return sent_ids
 
 
 def clean_phone_number(raw_phone: str) -> str:
@@ -33,7 +97,8 @@ def build_whatsapp_url(phone: str, message: str) -> str:
     """Builds pre-filled WhatsApp Web deep link."""
     clean_phone = clean_phone_number(phone)
     encoded_text = urllib.parse.quote(message)
-    return f"https://web.whatsapp.com/send?phone={clean_phone}&text={encoded_text}"
+    #return f"https://web.whatsapp.com/send?phone={clean_phone}&text={encoded_text}"
+    return f"https://api.whatsapp.com/send?phone={clean_phone}&text={encoded_text}"
 
 
 def render_followup_queue():
@@ -125,6 +190,7 @@ def render_followup_queue():
                     "id": task_id,
                     "customer": row["customer_name"],
                     "phone": clean_phone,
+                    "message": msg_text,
                     "url": wa_url
                 })
 
@@ -149,44 +215,39 @@ def render_followup_queue():
 
         with card_col_btn:
             if wa_url:
-                st.link_button("📲 Send WhatsApp", wa_url, use_container_width=True)
+#                st.link_button("📲 Send WhatsApp", wa_url, use_container_width=True)
+                st.markdown(
+                    f'<a href="{wa_url}" target="_blank" style="text-decoration:none;">'
+                    f'<button style="width:100%; height:38px; background-color:#25D366; color:white; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">'
+                    f'💬 Share on WhatsApp</button></a>',
+                    unsafe_allow_html=True,
+                )
             else:
                 st.button("⚠️ No Phone", disabled=True, key=f"disabled_{task_id}", use_container_width=True)
 
         st.divider()
 
     # 5. Bulk Trigger Operations
+    # 5. Bulk Trigger Operations
     with col_action:
-        if st.button(f"🚀 Open Selected ({len(selected_tasks)}) in WhatsApp", type="primary", disabled=(len(selected_tasks) == 0)):
-            target_ids = [t["id"] for t in selected_tasks]
-            target_urls = [t["url"] for t in selected_tasks]
+        if st.button(f"🚀 Auto-Send Selected ({len(selected_tasks)}) via Selenium", type="primary", disabled=(len(selected_tasks) == 0)):
+            with st.spinner("Automating WhatsApp messages in Chrome... Please leave the browser window in focus."):
+                successful_ids = dispatch_whatsapp_via_selenium(selected_tasks)
 
-            # Mark selected records as SENT in NeonDB
-            with engine.begin() as conn:
-                conn.execute(
-                    text("""
-                        UPDATE customer_followup_logs
-                        SET status = 'SENT'
-                        WHERE id = ANY(:ids);
-                    """),
-                    {"ids": target_ids}
-                )
-
-            # Client-side JavaScript to open each link sequentially with a 900ms stagger
-            # Staggering prevents the browser from jamming WhatsApp Web tabs
-            js_script = f"""
-            <script>
-                const urls = {json.dumps(target_urls)};
-                urls.forEach((url, index) => {{
-                    setTimeout(() => {{
-                        window.open(url, '_blank');
-                    }}, index * 900);
-                }});
-            </script>
-            """
-            components.html(js_script, height=0)
-            st.success(f"Dispatched {len(target_ids)} chats! Note: Allow pop-ups in your browser if all tabs did not open.")
-            st.rerun()
+            if successful_ids:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("""
+                            UPDATE customer_followup_logs
+                            SET status = 'SENT'
+                            WHERE id = ANY(:ids);
+                        """),
+                        {"ids": successful_ids}
+                    )
+                st.success(f"Successfully auto-dispatched {len(successful_ids)} of {len(selected_tasks)} messages!")
+                st.rerun()
+            else:
+                st.error("No messages were dispatched. Check if WhatsApp Web logged in successfully.")
 
     with col_dismiss:
         if st.button(f"Mark Selected as Dismissed", disabled=(len(selected_tasks) == 0)):

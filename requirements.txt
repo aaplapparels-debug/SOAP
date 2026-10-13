@@ -28,3 +28,8 @@ xlsxwriter
 # Standard library modules used throughout (base64, datetime, glob, hashlib,
 # io, os, re, secrets, shutil, subprocess, xml.etree.ElementTree, zipfile,
 # dataclasses, typing) need no entry here -- they ship with Python itself.
+
+flask
+openpyxl
+selenium
+webdriver-manager

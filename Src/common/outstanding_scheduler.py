@@ -192,7 +192,7 @@ def run_scheduler():
             # Sort the bills list descending by overdue_days
             data["bills"].sort(key=lambda x: x["overdue_days"], reverse=True)
             
-            total_overdue = sum(b["pending"] for b in data["bills"])
+            #total_overdue = sum(b["pending"] for b in data["bills"] if 30 <= b["overdue_days"] < 90)
             max_days = max(b["overdue_days"] for b in data["bills"])
                         
             # Format Bill Reference List:
@@ -200,15 +200,17 @@ def run_scheduler():
             # Otherwise: top 5 highest overdue bills
             if max_days >= 90:
                 target_bills = [b for b in data["bills"] if b["overdue_days"] >= 90]
+                total_overdue = sum(b["pending"] for b in data["bills"] if  b["overdue_days"] >= 90)
             else:
+                total_overdue = sum(b["pending"] for b in data["bills"] if 30 <= b["overdue_days"] < 90)
                 target_bills = data["bills"][:5]
 
             # Format: REF (Dt: 15-May-2024, ₹5,443.00, 112 days)
             bill_items = [
-                f"{b['ref']} (Dt: {b['inv_date']}, ₹{b['pending']:,.2f}, {b['overdue_days']} days)\n"
+                f"{b['ref']} (Dt: {b['inv_date']}, ₹{b['pending']:,.2f}, {b['overdue_days']} days)"
                 for b in target_bills
             ]
-            bill_refs = ", ".join(bill_items)
+            bill_refs = "  \n".join(bill_items)
 
             bucket = resolve_bucket(max_days, party, global_buckets, party_buckets)
             if not bucket:
