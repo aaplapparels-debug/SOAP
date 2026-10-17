@@ -145,6 +145,21 @@ def render_followup_queue():
     with col_sel:
         select_all = st.checkbox("Select All Accounts", value=False)
 
+
+    # Callback to toggle all row checkboxes when master toggle changes
+    def toggle_all_selection():
+        target_state = st.session_state.get("master_select_all", False)
+        for _, r in filtered_df.iterrows():
+            st.session_state[f"task_check_{int(r['id'])}"] = target_state
+
+    col_sel, col_action, col_dismiss = st.columns([2, 3, 2])
+    with col_sel:
+        select_all = st.checkbox(
+            "Select All Accounts", 
+            key="master_select_all",
+            on_change=toggle_all_selection
+        )
+
     # Initialize tracking of selected task IDs
     selected_tasks = []
 
