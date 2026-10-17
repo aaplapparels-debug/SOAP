@@ -139,31 +139,10 @@ def render_followup_queue():
 
     st.markdown("---")
 
-    # 3. Master Action Bar
-    col_sel, col_action, col_dismiss = st.columns([2, 3, 2])
-
-    with col_sel:
-        select_all = st.checkbox("Select All Accounts", value=False)
-
-
-    # Callback to toggle all row checkboxes when master toggle changes
-    def toggle_all_selection():
-        target_state = st.session_state.get("master_select_all", False)
-        for _, r in filtered_df.iterrows():
-            st.session_state[f"task_check_{int(r['id'])}"] = target_state
-
-    col_sel, col_action, col_dismiss = st.columns([2, 3, 2])
-    with col_sel:
-        select_all = st.checkbox(
-            "Select All Accounts", 
-            key="master_select_all",
-            on_change=toggle_all_selection
-        )
-
-    # Initialize tracking of selected task IDs
-    selected_tasks = []
-
-    # Filter by search or severity if needed
+# ---------------------------------------------------------
+    # 3. Filters & Master Action Bar
+    # ---------------------------------------------------------
+    # 3a. Compute filters FIRST so filtered_df exists for the callback
     with st.expander("🔍 Filter Queue", expanded=False):
         f_col1, f_col2 = st.columns(2)
         with f_col1:
@@ -179,9 +158,28 @@ def render_followup_queue():
     if search_query.strip():
         filtered_df = filtered_df[filtered_df["customer_name"].str.contains(search_query.strip(), case=False, na=False)]
 
-    st.write(f"Showing **{len(filtered_df)}** queued items:")
+    # 3b. Callback to sync session_state for all currently filtered records
+    def toggle_all_selection():
+        target_state = st.session_state.get("master_select_all", False)
+        for _, r in filtered_df.iterrows():
+            st.session_state[f"task_check_{int(r['id'])}"] = target_state
 
+    # 3c. Master controls bar
+    col_sel, col_action, col_dismiss = st.columns([2, 3, 2])
+    with col_sel:
+        st.checkbox(
+            "Select All Accounts", 
+            key="master_select_all",
+            on_change=toggle_all_selection
+        )
+
+    # Initialize tracking of selected task IDs
+    selected_tasks = []
+
+    st.write(f"Showing **{len(filtered_df)}** queued items:")
+# ---------------------------------------------------------
     # 4. Render Queue Cards
+    # ---------------------------------------------------------
     st.markdown("---")
     
     for idx, row in filtered_df.iterrows():
@@ -193,10 +191,14 @@ def render_followup_queue():
 
         card_col_check, card_col_details, card_col_btn = st.columns([1, 6, 2])
 
+        # Ensure the session state key is initialized if absent
+        if f"task_check_{task_id}" not in st.session_state:
+            st.session_state[f"task_check_{task_id}"] = False
+
         with card_col_check:
+            # Bind strictly through the key (DO NOT pass value=...)
             is_checked = st.checkbox(
                 "Select",
-                value=select_all,
                 key=f"task_check_{task_id}",
                 label_visibility="collapsed"
             )
@@ -230,7 +232,6 @@ def render_followup_queue():
 
         with card_col_btn:
             if wa_url:
-#                st.link_button("📲 Send WhatsApp", wa_url, use_container_width=True)
                 st.markdown(
                     f'<a href="{wa_url}" target="_blank" style="text-decoration:none;">'
                     f'<button style="width:100%; height:38px; background-color:#25D366; color:white; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">'
@@ -242,7 +243,6 @@ def render_followup_queue():
 
         st.divider()
 
-    # 5. Bulk Trigger Operations
     # 5. Bulk Trigger Operations
     with col_action:
         if st.button(f"🚀 Auto-Send Selected ({len(selected_tasks)}) via Selenium", type="primary", disabled=(len(selected_tasks) == 0)):
