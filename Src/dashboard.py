@@ -14,11 +14,16 @@ from ui.pages_sales_dashboard import show_sales_dashboard
 from ui.pages_stock import show_stock_position
 from ui.pages_scheduler_settings import render_scheduler_settings
 from ui.pages_followup_queue import render_followup_queue
+from ui.pages_admin import show_admin_page
 import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 import streamlit as st
+from ui.components.ticker import render_global_ticker
+
+
+
 
 st.set_page_config(
     page_title="AAPL Sales & Operations Portal",
@@ -176,6 +181,7 @@ def get_user_role(email: str):
 def show_home():
     from ui.style_loader import load_css
     load_css()
+
     # --- Inject Mobile-First Responsive CSS ---
     st.markdown(
         """
@@ -251,7 +257,8 @@ def show_home():
     """,
         unsafe_allow_html=True,
     )
-
+    # Call at the top of the main container:
+    render_global_ticker()
     # 1. Top Header Bar
     user_display = (
         st.session_state.user_email.split("@")[0]
@@ -419,6 +426,9 @@ else:
         page_delivery,
         page_scheduler,
         page_followup_queue,
+        page_admin := st.Page(
+            show_admin_page, title="Admin Panel", icon="🛠️"
+        ) if st.session_state.user_role == "Admin" else None,
     ]
 
     pg = st.navigation(pages, position="sidebar", expanded=True)

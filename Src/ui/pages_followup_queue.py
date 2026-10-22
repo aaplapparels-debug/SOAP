@@ -13,15 +13,15 @@ from sqlalchemy import text
 import os
 import time
 import urllib.parse
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-
+#from selenium import webdriver
+#from selenium.webdriver.common.by import By
+#from selenium.webdriver.common.keys import Keys
+#from selenium.webdriver.chrome.service import Service
+#from selenium.webdriver.chrome.options import Options
+#from selenium.webdriver.support.ui import WebDriverWait
+#from selenium.webdriver.support import expected_conditions as EC
+#from webdriver_manager.chrome import ChromeDriverManager
+from common.whatsapp_client import send_whatsapp_reminder, batch_dispatch_with_delay
 
 try:
     from ui.db_helper import get_engine
@@ -231,38 +231,73 @@ def render_followup_queue():
                 st.info(msg_text)
 
         with card_col_btn:
-            if wa_url:
-                st.markdown(
-                    f'<a href="{wa_url}" target="_blank" style="text-decoration:none;">'
-                    f'<button style="width:100%; height:38px; background-color:#25D366; color:white; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">'
-                    f'💬 Share on WhatsApp</button></a>',
-                    unsafe_allow_html=True,
-                )
+
+            if clean_phone:
+                if st.button("💬 Send via WhatsApp", key=f"btn_send_{task_id}", use_container_width=True):
+                    with st.spinner("Dispatching..."):
+                        resp = send_whatsapp_reminder(phone=clean_phone, message=msg_text)
+                        
+                        if resp.get("status") == "success":
+                            with engine.begin() as conn:
+                                conn.execute(
+                                    text("UPDATE customer_followup_logs SET status = 'SENT' WHERE id = :id;"),
+                                    {"id": task_id}
+                                )
+                            st.success("Sent!")
+                            time.sleep(0.8)
+                            st.rerun()
+                        else:
+                            err_detail = resp.get("message") or resp.get("error") or "Unknown error"
+                            st.error(f"Failed: {err_detail}")
+
+#            if wa_url:
+#                st.markdown(
+#                    f'<a href="{wa_url}" target="_blank" style="text-decoration:none;">'
+#                    f'<button style="width:100%; height:38px; background-color:#25D366; color:white; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">'
+#                    f'💬 Share on WhatsApp</button></a>',
+#                    unsafe_allow_html=True,
+#                )
             else:
                 st.button("⚠️ No Phone", disabled=True, key=f"disabled_{task_id}", use_container_width=True)
 
         st.divider()
 
-    # 5. Bulk Trigger Operations
+    
+    # 5. Bulk Trigger Operations via Evolution API
     with col_action:
-        if st.button(f"🚀 Auto-Send Selected ({len(selected_tasks)}) via Selenium", type="primary", disabled=(len(selected_tasks) == 0)):
-            with st.spinner("Automating WhatsApp messages in Chrome... Please leave the browser window in focus."):
-                successful_ids = dispatch_whatsapp_via_selenium(selected_tasks)
+        if st.button(
+            f"🚀 Dispatch Selected ({len(selected_tasks)})", 
+            type="primary", 
+            disabled=(len(selected_tasks) == 0)
+        ):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            def update_progress(current, total, customer):
+                progress_bar.progress(current / total)
+                status_text.text(f"Sending ({current}/{total}) to {customer}...")
+
+            # Run the batch dispatcher from whatsapp_client.py
+            result = batch_dispatch_with_delay(selected_tasks, progress_callback=update_progress)
+            successful_ids = result.get("successful_ids", [])
+            failed_accounts = result.get("failed_accounts", [])
+
+            status_text.empty()
+            progress_bar.empty()
 
             if successful_ids:
                 with engine.begin() as conn:
                     conn.execute(
-                        text("""
-                            UPDATE customer_followup_logs
-                            SET status = 'SENT'
-                            WHERE id = ANY(:ids);
-                        """),
+                        text("UPDATE customer_followup_logs SET status = 'SENT' WHERE id = ANY(:ids);"),
                         {"ids": successful_ids}
                     )
-                st.success(f"Successfully auto-dispatched {len(successful_ids)} of {len(selected_tasks)} messages!")
-                st.rerun()
-            else:
-                st.error("No messages were dispatched. Check if WhatsApp Web logged in successfully.")
+                st.success(f"Dispatched {len(successful_ids)} messages via Evolution API!")
+
+            if failed_accounts:
+                st.error(f"Failed accounts ({len(failed_accounts)}): {', '.join(failed_accounts)}")
+
+            time.sleep(1)
+            st.rerun()
 
     with col_dismiss:
         if st.button(f"Mark Selected as Dismissed", disabled=(len(selected_tasks) == 0)):

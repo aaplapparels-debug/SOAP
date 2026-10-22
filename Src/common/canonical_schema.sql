@@ -329,3 +329,13 @@ CREATE TABLE IF NOT EXISTS customer_followup_logs (
     status VARCHAR(50) DEFAULT 'PENDING',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS portal_ticker_config (
+    id SERIAL PRIMARY KEY,
+    active_mode VARCHAR(30) DEFAULT 'BROADCAST', -- 'BROADCAST', 'TOP_ITEMS', 'TOP_CUSTOMERS'
+    broadcast_message TEXT DEFAULT 'Welcome to AAPL SOAP Portal. End-of-season reconciliations in progress.',
+    top_limit INT DEFAULT 10,
+    metric_type VARCHAR(10) DEFAULT 'QTY',       -- 'QTY' or 'VALUE' (for customers)
+    is_enabled BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

@@ -199,7 +199,7 @@ def run_scheduler():
             # If 90+ days: list ALL bills that are >= 90 days
             # Otherwise: top 5 highest overdue bills
             if max_days >= 90:
-                target_bills = [b for b in data["bills"] if b["overdue_days"] >= 90]
+                target_bills = [b for b in data["bills"] if b["overdue_days"] > 90]
                 total_overdue = sum(b["pending"] for b in data["bills"] if  b["overdue_days"] > 90)
             else:
                 total_overdue = sum(b["pending"] for b in data["bills"] if  b["overdue_days"] <= 90)

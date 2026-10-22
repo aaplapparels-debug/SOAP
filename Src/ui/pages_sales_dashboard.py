@@ -131,16 +131,44 @@ def show_sales_dashboard():
 
     today = datetime.date.today()
 
-    # Match active JC Period based on today's date
-    current_match = periods_df[
+    # 1. Normalize dates and financial_year in periods_df
+    periods_df["financial_year"] = (
+        pd.to_numeric(periods_df["financial_year"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+    periods_df["start_date"] = pd.to_datetime(periods_df["start_date"]).dt.date
+    periods_df["end_date"] = pd.to_datetime(periods_df["end_date"]).dt.date
+
+    # 2. Determine Current Financial Year (CY) dynamically from DB calendar
+    today_match = periods_df[
         (periods_df["start_date"] <= today) & (today <= periods_df["end_date"])
     ]
-    if not current_match.empty:
-        default_index = int(current_match.index[0])
+    if not today_match.empty:
+        current_financial_year = int(today_match.iloc[0]["financial_year"])
     else:
-        default_index = len(periods_df) - 1
+        start_yr = today.year if today.month >= 4 else today.year - 1
+        current_financial_year = int(f"{start_yr}{start_yr + 1}")
 
-    jc_list = periods_df["jc_code"].tolist()
+    # 3. Filter strictly for Current Financial Year (CY)
+    filtered_df = periods_df[periods_df["financial_year"] == current_financial_year].copy()
+    if not filtered_df.empty and "start_date" in filtered_df.columns:
+        filtered_df = filtered_df.sort_values(by="start_date", ascending=True)
+
+    # 4. Extract distinct CY JC codes
+    jc_list = filtered_df["jc_code"].drop_duplicates().tolist()
+    if not jc_list:
+        st.warning(f"No JC periods found for current FY {current_financial_year}.")
+        return
+
+    # 5. Default index: Active JC cycle in CY
+    if not today_match.empty:
+        active_code = today_match.iloc[0]["jc_code"]
+        default_index = jc_list.index(active_code) if active_code in jc_list else 0
+    else:
+        default_index = len(jc_list) - 1
+
+    st.write(f"**Current Financial Year:** {current_financial_year}  |  **Today's Date:** {today.strftime('%d %b %Y')}")
 
     # --- Header Selection & Date Window Display ---
     col_sel, col_dates = st.columns([1, 2])
@@ -150,9 +178,9 @@ def show_sales_dashboard():
             "Select JC Month:", jc_list, index=default_index
         )
 
-    # Get selected period details
-    selected_row = periods_df[periods_df["jc_code"] == selected_jc].iloc[0]
-    selected_fy = selected_row["financial_year"]
+    # CRITICAL FIX: Pick selected row from filtered_df (CY), NEVER raw periods_df!
+    selected_row = filtered_df[filtered_df["jc_code"] == selected_jc].iloc[0]
+    selected_fy = int(selected_row["financial_year"])
     start_dt = selected_row["start_date"]
     end_dt = selected_row["end_date"]
 
@@ -161,7 +189,7 @@ def show_sales_dashboard():
         st.info(
             f"📅 **Period Range:** {start_dt.strftime('%d %b %Y')} &nbsp;➔&nbsp; {end_dt.strftime('%d %b %Y')}"
         )
-
+    
     try:
         perf_df = fetch_performance_data(engine, financial_year=selected_fy)
 

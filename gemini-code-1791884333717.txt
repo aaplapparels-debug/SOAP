@@ -1,0 +1,43 @@
+=====================================================
+            GIT CHEAT SHEET - DAILY WORKFLOW
+=====================================================
+
+1. CHECK STATUS & CHANGES
+-----------------------------------------------------
+git status                    # Check modified, untracked, or staged files
+git diff                      # See exact line-by-line changes before staging
+
+
+2. STAGE & COMMIT
+-----------------------------------------------------
+git add <filename>            # Stage a single specific file
+git add .                     # Stage all changed files in project
+git commit -m "Your message"  # Commit staged changes with description
+
+
+3. PUSH & PULL (SYNC WITH GITHUB)
+-----------------------------------------------------
+git pull origin main          # Pull latest remote changes to avoid conflicts
+git push origin main          # Push your commits to GitHub main branch
+
+
+4. DISCARD MISTAKES & UNSTAGED CHANGES
+-----------------------------------------------------
+git restore <filename>        # Discard uncommitted changes in a specific file
+git restore .                 # Discard ALL local unstaged changes (be careful)
+git restore --staged <file>   # Unstage a file (keep the file changes)
+
+
+5. VIEW HISTORY
+-----------------------------------------------------
+git log --oneline -5          # View last 5 commits in compact 1-line format
+git remote -v                 # Verify connected remote repository URL
+
+
+=====================================================
+           QUICK 3-STEP PUSH RECIPE
+=====================================================
+git add .
+git commit -m "Update scheduler logic and bug fixes"
+git push origin main
+=====================================================

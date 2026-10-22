@@ -201,8 +201,8 @@ def show_sales_360():
     SELECT COALESCE(SUM(amount), 0) AS total_receipts
     FROM receipts
     WHERE (CAST(:full_name AS VARCHAR) IS NULL OR customer_name = CAST(:full_name AS VARCHAR))
-    AND((receipt_date BETWEEN :curr_start AND CURRENT_DATE AND mode_of_payment = 'Cash') 
-    OR (instrument_date IS NOT NULL AND TO_DATE(instrument_date, 'YYYYMMDD') <= CURRENT_DATE and TO_DATE(instrument_date, 'YYYYMMDD') >= CAST(:curr_start AS DATE)))  
+    AND((receipt_date BETWEEN :curr_start AND :curr_end AND mode_of_payment = 'Cash') 
+    OR (instrument_date IS NOT NULL AND TO_DATE(instrument_date, 'YYYYMMDD') <= :curr_end) and TO_DATE(instrument_date, 'YYYYMMDD') >= CAST(:curr_start AS DATE)))  
     """
 
     pdc_query = """
