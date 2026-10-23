@@ -8,6 +8,7 @@ import time
 import random
 import requests
 import base64
+import streamlit as st
 
 
 def _get_api_credentials():
