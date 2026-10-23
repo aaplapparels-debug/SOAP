@@ -7,28 +7,42 @@ import os
 import time
 import random
 import requests
+import base64
 
-EVO_URL = os.getenv("EVOLUTION_API_URL", "http://localhost:8080")
-EVO_KEY = os.getenv("EVOLUTION_API_KEY", "soap_dev_secret_key_2026")
-EVO_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "soap_instance")
 
-def send_whatsapp_document(phone: str, pdf_bytes: bytes, filename: str, caption: str = "") -> dict:
-    """
-    Sends a PDF document with an optional caption via Evolution API sendMedia.
-    """
+def _get_api_credentials():
+    """Extracts disguised credentials from Streamlit secrets with fallback."""
+    if "telemetry_bridge" in st.secrets:
+        url = st.secrets["telemetry_bridge"]["endpoint"].rstrip("/")
+        key = st.secrets["telemetry_bridge"]["access_token"]
+        instance = st.secrets["telemetry_bridge"]["session_id"]
+    else:
+        # Local development fallback
+        url = "http://localhost:8080"
+        key = "soap_dev_secret_key_2026"
+        instance = "soap_instance"
+    return url, key, instance
+
+def send_whatsapp_document(phone: str, file_bytes: bytes, filename: str, caption: str = "") -> dict:
+    url, key, instance = _get_api_credentials()
     clean_phone = "".join(filter(str.isdigit, str(phone)))
     if len(clean_phone) == 10:
         clean_phone = "91" + clean_phone
 
-    endpoint = f"{EVOLUTION_API_URL}/message/sendMedia/{INSTANCE_NAME}"
-    headers = {"apikey": API_KEY, "Content-Type": "application/json"}
+    endpoint = f"{url}/message/sendMedia/{instance}"
+    headers = {"apikey": key, "Content-Type": "application/json"}
 
-    b64_data = base64.b64encode(pdf_bytes).decode("utf-8")
+    b64_data = base64.b64encode(file_bytes).decode("utf-8")
+    mime_type = (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if filename.endswith(".xlsx")
+        else "application/pdf"
+    )
 
     payload = {
         "number": clean_phone,
         "mediatype": "document",
-        "mimetype": "application/pdf",
+        "mimetype": mime_type,
         "caption": caption,
         "media": b64_data,
         "fileName": filename
@@ -43,36 +57,22 @@ def send_whatsapp_document(phone: str, pdf_bytes: bytes, filename: str, caption:
         return {"status": "error", "error": str(e)}
         
 def send_whatsapp_reminder(phone: str, message: str) -> dict:
-    """Dispatches a single multiline WhatsApp message via Evolution API."""
-    clean_digits = "".join(filter(str.isdigit, str(phone)))
-    if len(clean_digits) == 10:
-        target_number = f"91{clean_digits}"
-    elif len(clean_digits) == 12 and clean_digits.startswith("91"):
-        target_number = clean_digits
-    else:
-        return {"status": "error", "message": f"Invalid phone format: {phone}"}
+    url, key, instance = _get_api_credentials()
+    clean_phone = "".join(filter(str.isdigit, str(phone)))
+    if len(clean_phone) == 10:
+        clean_phone = "91" + clean_phone
 
-    url = f"{EVO_URL}/message/sendText/{EVO_INSTANCE}"
-    headers = {
-        "apikey": EVO_KEY,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "number": target_number,
-        "text": message
-    }
+    endpoint = f"{url}/message/sendText/{instance}"
+    headers = {"apikey": key, "Content-Type": "application/json"}
+    payload = {"number": clean_phone, "text": message}
 
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=15)
-        if response.status_code in (200, 201):
-            return {"status": "success", "data": response.json()}
-        return {
-            "status": "failed",
-            "code": response.status_code,
-            "error": response.text
-        }
-    except requests.exceptions.RequestException as e:
-        return {"status": "error", "message": str(e)}
+        resp = requests.post(endpoint, json=payload, headers=headers, timeout=12)
+        if resp.status_code in (200, 201):
+            return {"status": "success", "data": resp.json()}
+        return {"status": "error", "message": f"HTTP {resp.status_code}: {resp.text}"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 def batch_dispatch_with_delay(reminders: list[dict], progress_callback=None) -> dict:
