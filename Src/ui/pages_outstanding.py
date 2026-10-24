@@ -410,6 +410,13 @@ def show_outstanding_report():
                             st.error("Please enter a valid 10-digit customer phone number.")
                         else:
                             with st.spinner("Dispatching statement & PDF through Evolution API..."):
+
+                                pdf_bytes = generate_outstanding_pdf(
+                                    customer_name=selected_customer,
+                                    df_sorted=df_sorted_for_pdf,
+                                    total_amt=total_outstanding,
+                                    pdc_amt=pdc_total
+                                )
                                 # Send PDF with caption
                                 resp = send_whatsapp_document(
                                     phone=clean_target_phone,
