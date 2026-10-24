@@ -420,7 +420,7 @@ def show_outstanding_report():
                                 # Send PDF with caption
                                 resp = send_whatsapp_document(
                                     phone=clean_target_phone,
-                                    pdf_bytes=pdf_bytes,
+                                    file_bytes=pdf_bytes,
                                     filename=f"Outstanding_Statement_{selected_customer.replace(' ', '_')}.pdf",
                                     caption=wa_msg
                                 )
