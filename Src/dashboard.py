@@ -284,7 +284,7 @@ with st.sidebar:
     st.caption(f"👤 **{st.session_state.user_email}**\n\nRole: **{st.session_state.user_role}**")
     if st.button("🚪 Logout", use_container_width=True, key="btn_logout_sb"):
         handle_logout()
-    elif st.button("🔄 Refresh", use_container_width=True, key="btn_refresh_sb"):
+    if st.button("🔄 Refresh", use_container_width=True, key="btn_refresh_sb"):
         st.rerun()
 
 pg.run()
