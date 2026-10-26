@@ -220,7 +220,7 @@ if not st.user.is_logged_in:
 
   # Triggers Google OAuth and sets persistent HTTP-only cookie automatically
   if st.button("📧 Log in with Google", type="primary"):
-    st.login()
+    st.login('google')
 
   st.stop()
 
