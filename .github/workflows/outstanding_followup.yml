@@ -23,6 +23,7 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install --upgrade pip
+          pip install psycopg2-binary
           pip install -r requirements.txt
 
       - name: Execute Outstanding Scheduler

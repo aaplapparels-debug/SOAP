@@ -32,6 +32,7 @@ streamlit-cookies-controller
 pyjwt
 extra_streamlit_components
 httpx>=0.27.0
+scramp<1.5.0
 
 
 # Standard library modules used throughout (base64, datetime, glob, hashlib,
