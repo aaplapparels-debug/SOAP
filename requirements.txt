@@ -30,7 +30,7 @@ xlsxwriter
 reportlab
 streamlit-cookies-controller
 pyjwt
-extra_streamlit_com
+extra_streamlit_components
 
 
 
