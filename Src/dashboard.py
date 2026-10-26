@@ -122,20 +122,20 @@ def fetch_hub_live_metrics():
 # =====================================================================
 # 2. OAUTH HELPERS
 # =====================================================================
-def get_oauth_flow() -> Flow:
-    if "oauth" in dashboard_cfg:
-        oauth_cfg = dashboard_cfg["oauth"]
-        redirect_uri = oauth_cfg["web"]["redirect_uris"][0]
-        return Flow.from_client_config(
-            client_config=dict(oauth_cfg),
-            scopes=SCOPES,
-            redirect_uri=redirect_uri,
-        )
-    return Flow.from_client_secrets_file(
-        dashboard_cfg.get("oauth_client_secret_file", "client_secret.json"),
-        scopes=SCOPES,
-        redirect_uri=dashboard_cfg.get("redirect_uri", "https://aapl-soap.streamlit.app"),
-    )
+#def get_oauth_flow() -> Flow:
+#    if "oauth" in dashboard_cfg:
+#        oauth_cfg = dashboard_cfg["oauth"]
+#        redirect_uri = oauth_cfg["web"]["redirect_uris"][0]
+#        return Flow.from_client_config(
+#            client_config=dict(oauth_cfg),
+#            scopes=SCOPES,
+#            redirect_uri=redirect_uri,
+#        )
+#    return Flow.from_client_secrets_file(
+#        dashboard_cfg.get("oauth_client_secret_file", "client_secret.json"),
+#        scopes=SCOPES,
+#        redirect_uri=dashboard_cfg.get("redirect_uri", "https://aapl-soap.streamlit.app"),
+#    )
 
 def get_user_role(email: str):
   """Lookup user role from database."""
