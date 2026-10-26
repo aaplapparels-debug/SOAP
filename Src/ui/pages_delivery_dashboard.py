@@ -7,7 +7,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 import streamlit as st
 
-
 from ui.db_helper import get_engine
 
 
@@ -48,7 +47,6 @@ def show_delivery_dashboard():
                 index=0,
             )
         with f_col3:
-            # Use engine.connect() for read-only SELECT queries
             with engine.connect() as conn:
                 divs = pd.read_sql(
                     text(
@@ -62,7 +60,7 @@ def show_delivery_dashboard():
 
         with f_col4:
             search_query = st.text_input(
-                "Search Doc No / Prefix / Customer", value=""
+                "Search Doc No / Customer Name / Code", value=""
             )
 
     # Safe date handling for incomplete user clicks
@@ -74,13 +72,12 @@ def show_delivery_dashboard():
         start_dt = end_dt = date.today()
 
     # ---------------------------------------------------------
-    # 2. Build Query Clauses (Type-Safe for integer doc_no)
+    # 2. Build Query Clauses
     # ---------------------------------------------------------
     status_clause = ""
     if status_filter == "All Pending (Open/Hold/Dispatched)":
         status_clause = (
-            "AND COALESCE(d.status, 'Open') IN ('Open', 'Dispatched', 'On"
-            " Hold')"
+            "AND COALESCE(d.status, 'Open') IN ('Open', 'Dispatched', 'On Hold')"
         )
     elif status_filter != "All":
         status_clause = f"AND COALESCE(d.status, 'Open') = '{status_filter}'"
@@ -99,6 +96,7 @@ def show_delivery_dashboard():
                 OR CAST(s.doc_prefix AS TEXT) ILIKE '%%{q}%%' 
                 OR CONCAT(s.doc_prefix, '-', s.doc_no) ILIKE '%%{q}%%'
                 OR CAST(s.customer_code AS TEXT) ILIKE '%%{q}%%'
+                OR CAST(c.customer_name AS TEXT) ILIKE '%%{q}%%'
             )
         """
 
@@ -110,6 +108,7 @@ def show_delivery_dashboard():
         CONCAT(s.doc_prefix, '-', s.doc_no) AS full_doc_no,
         s.sale_date,
         s.customer_code,
+        COALESCE(c.customer_name, s.customer_code) AS customer_name,
         SUM(s.qty * COALESCE(s.sign_multiplier, 1)) AS total_qty,
         SUM(s.net_value * COALESCE(s.sign_multiplier, 1)) AS total_val,
         COALESCE(d.status, 'Open') AS status,
@@ -121,6 +120,10 @@ def show_delivery_dashboard():
         d.updated_by,
         d.updated_at
     FROM sales s
+    LEFT JOIN customers c
+        ON s.customer_code = c.customer_code
+        AND s.division = c.division
+        AND s.source_system = c.source_system
     LEFT JOIN delivery_status d 
         ON s.division = d.division 
         AND s.doc_prefix = d.doc_prefix
@@ -131,7 +134,7 @@ def show_delivery_dashboard():
       {status_clause}
       {search_clause}
     GROUP BY 
-        s.division, s.doc_prefix, s.doc_no, s.sale_date, s.customer_code,
+        s.division, s.doc_prefix, s.doc_no, s.sale_date, s.customer_code, c.customer_name,
         d.status, d.transporter, d.tracking_no, d.dispatch_date, d.delivery_date, 
         d.remarks, d.updated_by, d.updated_at
     ORDER BY s.sale_date DESC, s.doc_no DESC;
@@ -153,13 +156,11 @@ def show_delivery_dashboard():
     c1.metric("Documents Listed", len(df))
     c2.metric("Pending Dispatch (Open)", len(df[df["status"] == "Open"]))
     c3.metric("In Transit (Dispatched)", len(df[df["status"] == "Dispatched"]))
-    c4.metric(
-        "Completed Deliveries", len(df[df["status"] == "Delivered"])
-    )
+    c4.metric("Completed Deliveries", len(df[df["status"] == "Delivered"]))
 
     st.markdown("---")
     st.caption(
-        "💡 Edit status, transporter details, or dates directly in the table"
+        "✏️ Edit status, transporter details, or dates directly in the table"
         " below, then click **Commit Delivery Updates**."
     )
 
@@ -173,6 +174,7 @@ def show_delivery_dashboard():
         "full_doc_no",
         "sale_date",
         "customer_code",
+        "customer_name",
         "total_qty",
         "total_val",
         "updated_by",
@@ -189,6 +191,7 @@ def show_delivery_dashboard():
             "division",
             "full_doc_no",
             "sale_date",
+            "customer_name",
             "customer_code",
             "total_qty",
             "total_val",
@@ -207,7 +210,8 @@ def show_delivery_dashboard():
                 "Document No", width="medium"
             ),
             "sale_date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
-            "customer_code": st.column_config.TextColumn("Customer"),
+            "customer_name": st.column_config.TextColumn("Customer Name", width="large"),
+            "customer_code": st.column_config.TextColumn("Code", width="small"),
             "total_qty": st.column_config.NumberColumn("Qty", format="%d"),
             "total_val": st.column_config.NumberColumn(
                 "Net Value", format="₹%.2f"
@@ -223,9 +227,7 @@ def show_delivery_dashboard():
                 ],
                 required=True,
             ),
-            "transporter": st.column_config.TextColumn(
-                "Transporter / Courier"
-            ),
+            "transporter": st.column_config.TextColumn("Transporter / Courier"),
             "tracking_no": st.column_config.TextColumn("Docket / LR No"),
             "dispatch_date": st.column_config.DateColumn(
                 "Dispatch Date", format="DD/MM/YYYY"
@@ -242,7 +244,7 @@ def show_delivery_dashboard():
     )
 
     # ---------------------------------------------------------
-    # 5. Commit Updates & Audit Trail (Transaction block)
+    # 5. Commit Updates & Audit Trail
     # ---------------------------------------------------------
     if st.button("💾 Commit Delivery Updates", type="primary"):
         diff_mask = (
@@ -297,7 +299,7 @@ def show_delivery_dashboard():
             for idx, row in changed_rows.iterrows():
                 original_status = df.loc[idx, "status"]
 
-                # 1. Update/Insert the delivery state
+                # 1. Update/Insert delivery state
                 conn.execute(
                     upsert_status_sql,
                     {

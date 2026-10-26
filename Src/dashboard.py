@@ -1,6 +1,6 @@
 """
 AAPL Sales & Operations Automation Portal (SOAP)
-Main entry point with Google OAuth, Mobile-First Action Hub, and Page Routing.
+Main entry point with Google OAuth + Persistent Session Cookie.
 """
 from datetime import date
 import secrets
@@ -18,12 +18,10 @@ from ui.pages_admin import show_admin_page
 import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
-from sqlalchemy.pool import NullPool
 import streamlit as st
 from ui.components.ticker import render_global_ticker
-
-
-
+from common.auth import get_authenticated_user, set_auth_cookie, logout_user
+from ui.pages_legacy_sales import show_legacy_sales_dashboard
 
 st.set_page_config(
     page_title="AAPL Sales & Operations Portal",
@@ -36,12 +34,25 @@ config = load_ui_config()
 dashboard_cfg = config["dashboard"]
 SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
+def handle_logout():
+    """Clears in-memory session variables and executes native Streamlit logout to purge the cookie."""
+    # 1. Clear custom session credentials
+    keys_to_clear = [
+        "user_email",
+        "user_role",
+        "selected_divisions",
+        "selected_customer",
+        "selected_aging_bucket",
+    ]
+    for key in keys_to_clear:
+        st.session_state.pop(key, None)
+
+    st.logout()  # 2. Native Streamlit logout to clear the HTTP-only cookie
 
 # =====================================================================
 # 1. DATABASE & LIVE METRICS ENGINE
 # =====================================================================
 from ui.db_helper import get_engine
-
 
 def format_inr(val):
     if val is None or val == 0:
@@ -57,16 +68,11 @@ def format_inr(val):
     else:
         return f"{sign}₹{abs_val:,.0f}"
 
-
 @st.cache_data(ttl=180)
 def fetch_hub_live_metrics():
-    """Fetches fast aggregated metrics for the mobile action tiles."""
     engine = get_engine()
     with engine.connect() as conn:
-        # 1. Dispatches Pending (Last 30 days)
-        open_disp = (
-            conn.execute(
-                text("""
+        open_disp = conn.execute(text("""
             SELECT COUNT(DISTINCT CONCAT(s.division, '-', s.doc_prefix, '-', s.doc_no))
             FROM sales s
             LEFT JOIN delivery_status d 
@@ -76,48 +82,24 @@ def fetch_hub_live_metrics():
             WHERE s.source_system = 'shoper'
               AND s.sale_date >= CURRENT_DATE - INTERVAL '30 days'
               AND COALESCE(d.status, 'Open') = 'Open'
-        """)
-            ).scalar()
-            or 0
-        )
+        """)).scalar() or 0
 
-        # 2. Total Outstanding Receivables (Tally)
-        total_os = (
-            conn.execute(
-                text("""
+        total_os = conn.execute(text("""
             SELECT COALESCE(SUM(pending_amount), 0) FROM outstanding_debtors
-        """)
-            ).scalar()
-            or 0
-        )
+        """)).scalar() or 0
 
-        # 3. Stock Value (Shoper)
-        total_stock = (
-            conn.execute(
-                text("""
+        total_stock = conn.execute(text("""
             SELECT COALESCE(SUM(stock_value), 0) FROM items WHERE source_system = 'shoper'
-        """)
-            ).scalar()
-            or 0
-        )
+        """)).scalar() or 0
 
-        # 4. MTD Sales (Current Month Achievement)
-        mtd_sales = (
-            conn.execute(
-                text("""
+        mtd_sales = conn.execute(text("""
             SELECT COALESCE(SUM(s.net_value * COALESCE(s.sign_multiplier, 1)), 0)
             FROM sales s
             WHERE s.source_system = 'shoper'
               AND s.sale_date >= DATE_TRUNC('month', CURRENT_DATE)
-        """)
-            ).scalar()
-            or 0
-        )
+        """)).scalar() or 0
 
-        # 5. Bottleneck Invoices (Pending > 48 Hours)
-        bottlenecks = (
-            conn.execute(
-                text("""
+        bottlenecks = conn.execute(text("""
             SELECT COUNT(DISTINCT CONCAT(s.division, '-', s.doc_prefix, '-', s.doc_no))
             FROM sales s
             LEFT JOIN delivery_status d 
@@ -127,10 +109,7 @@ def fetch_hub_live_metrics():
             WHERE s.source_system = 'shoper'
               AND s.sale_date BETWEEN CURRENT_DATE - INTERVAL '20 days' AND CURRENT_DATE - INTERVAL '2 days'
               AND COALESCE(d.status, 'Open') = 'Open'
-        """)
-            ).scalar()
-            or 0
-        )
+        """)).scalar() or 0
 
     return {
         "open_dispatches": int(open_disp),
@@ -139,7 +118,6 @@ def fetch_hub_live_metrics():
         "mtd_sales_str": format_inr(mtd_sales),
         "bottlenecks": int(bottlenecks),
     }
-
 
 # =====================================================================
 # 2. OAUTH HELPERS
@@ -156,24 +134,27 @@ def get_oauth_flow() -> Flow:
     return Flow.from_client_secrets_file(
         dashboard_cfg.get("oauth_client_secret_file", "client_secret.json"),
         scopes=SCOPES,
-        redirect_uri=dashboard_cfg.get(
-            "redirect_uri", "https://aapl-soap.streamlit.app"
-        ),
+        redirect_uri=dashboard_cfg.get("redirect_uri", "https://aapl-soap.streamlit.app"),
     )
 
-
 def get_user_role(email: str):
-    engine = get_engine()
+  """Lookup user role from database."""
+  if not email:
+    return None
+  engine = get_engine()
+  try:
     with engine.connect() as conn:
-        result = conn.execute(
-            text(
-                "SELECT role FROM dashboard_users WHERE email = :e AND"
-                " is_active = TRUE"
-            ),
-            {"e": email.lower().strip()},
-        ).fetchone()
-    return result[0] if result else None
-
+      result = conn.execute(
+          text(
+              "SELECT role FROM dashboard_users WHERE email = :e AND is_active"
+              " = TRUE"
+          ),
+          {"e": email.lower().strip()},
+      ).fetchone()
+      return result[0] if result else None
+  except Exception as e:
+    st.error(f"Error checking user permissions: {e}")
+    return None
 
 # =====================================================================
 # 3. MOBILE-OPTIMIZED HOME PAGE
@@ -181,99 +162,25 @@ def get_user_role(email: str):
 def show_home():
     from ui.style_loader import load_css
     load_css()
-
-    # --- Inject Mobile-First Responsive CSS ---
-    st.markdown(
-        """
-    <style>
-        .block-container {
-            padding-top: 1rem !important;
-            padding-bottom: 2rem !important;
-            padding-left: 0.8rem !important;
-            padding-right: 0.8rem !important;
-        }
-        .mobile-header-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: #ffffff;
-            padding: 10px 14px;
-            border-radius: 12px;
-            margin-bottom: 12px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-            border: 1px solid #E2E8F0;
-        }
-        .pulse-card {
-            background: linear-gradient(135deg, #FFF5F5 0%, #FED7D7 100%);
-            border-left: 5px solid #E53E3E;
-            padding: 12px 14px;
-            border-radius: 12px;
-            margin-top: 10px;
-            margin-bottom: 14px;
-        }
-        .pulse-card-title {
-            font-size: 12px;
-            font-weight: 700;
-            color: #9B2C2C;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .pulse-card-desc {
-            font-size: 13px;
-            color: #2D3748;
-            margin-top: 2px;
-        }
-        /* Lock columns into a 2x2 grid on mobile viewports */
-        @media (max-width: 640px) {
-            div[data-testid="stHorizontalBlock"] {
-                flex-wrap: wrap !important;
-                gap: 8px !important;
-            }
-            div[data-testid="column"] {
-                flex: 1 1 calc(50% - 10px) !important;
-                min-width: calc(50% - 10px) !important;
-            }
-        }
-        /* Touch Card Button Styling */
-        div[data-testid="column"] .stButton > button {
-            width: 100% !important;
-            height: 90px !important;
-            border-radius: 14px !important;
-            border: 1px solid #CBD5E0 !important;
-            background-color: #FFFFFF !important;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.04) !important;
-            padding: 8px !important;
-            font-size: 13px !important;
-            font-weight: 600 !important;
-            color: #2D3748 !important;
-            white-space: pre-wrap !important;
-            line-height: 1.4 !important;
-        }
-        div[data-testid="column"] .stButton > button:active {
-            transform: scale(0.97) !important;
-            background-color: #EDF2F7 !important;
-        }
-    </style>
-    """,
-        unsafe_allow_html=True,
-    )
-    # Call at the top of the main container:
     render_global_ticker()
-    # 1. Top Header Bar
-    user_display = (
-        st.session_state.user_email.split("@")[0]
-        if st.session_state.user_email
-        else "User"
+
+    # Read directly from st.user (fallback to session_state or "User")
+    email_val = (
+        getattr(st.user, "email", None)
+        or st.session_state.get("user_email")
+        or ""
     )
+    user_display = email_val.split("@")[0] if email_val else "User"
     role_display = st.session_state.get("user_role", "Viewer")
+
     st.markdown(
         f"""
-        <div class="mobile-header-bar">
+        <div style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:10px 14px; border-radius:12px; margin-bottom:12px; border:1px solid #E2E8F0;">
             <div>
-                <span style="font-size: 11px; color: #718096; text-transform: uppercase; font-weight: 700;">AAPL Operations Hub</span><br>
-                <span style="font-size: 15px; font-weight: 700; color: #1A202C;">📍 All Operating Divisions</span>
+                <span style="font-size:11px; color:#718096; text-transform:uppercase; font-weight:700;">AAPL Operations Hub</span><br>
+                <span style="font-size:15px; font-weight:700; color:#1A202C;">📍 All Operating Divisions</span>
             </div>
-            <div style="background: #EDF2F7; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #2D3748;">
+            <div style="background:#EDF2F7; padding:4px 10px; border-radius:20px; font-size:12px; font-weight:600; color:#2D3748;">
                 👤 {user_display} ({role_display})
             </div>
         </div>
@@ -281,169 +188,103 @@ def show_home():
         unsafe_allow_html=True,
     )
 
-    # 2. Fetch Live Metrics
     metrics = fetch_hub_live_metrics()
-
-    # 3. The 4 Live Action Tiles
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        if st.button(
-            f"🚚 Dispatch\n{metrics['open_dispatches']} Pending",
-            key="hub_btn_disp",
-            use_container_width=True,
-        ):
+        if st.button(f"🚚 Dispatch\n{metrics['open_dispatches']} Pending", key="hub_btn_disp", use_container_width=True):
             st.switch_page(page_delivery)
-
     with col2:
-        if st.button(
-            f"📋 Debtors\n{metrics['outstanding_str']}",
-            key="hub_btn_os",
-            use_container_width=True,
-        ):
+        if st.button(f"📋 Debtors\n{metrics['outstanding_str']}", key="hub_btn_os", use_container_width=True):
             st.switch_page(page_outstanding)
-
     with col3:
-        if st.button(
-            f"📦 Inventory\n{metrics['stock_str']}",
-            key="hub_btn_stk",
-            use_container_width=True,
-        ):
+        if st.button(f"📦 Inventory\n{metrics['stock_str']}", key="hub_btn_stk", use_container_width=True):
             st.switch_page(page_stock)
-
     with col4:
-        if st.button(
-            f"🎯 MTD Sales\n{metrics['mtd_sales_str']}",
-            key="hub_btn_sal",
-            use_container_width=True,
-        ):
+        if st.button(f"🎯 MTD Sales\n{metrics['mtd_sales_str']}", key="hub_btn_sal", use_container_width=True):
             st.switch_page(page_sales)
 
-    # 4. Operational Bottleneck Banner
     if metrics["bottlenecks"] > 0:
-        st.markdown(
-            f"""
-            <div class="pulse-card">
-                <div class="pulse-card-title">⚠️ Operational Bottleneck Alert</div>
-                <div class="pulse-card-desc">
-                    <b>{metrics['bottlenecks']} invoice(s)</b> have remained in <b>Open</b> status for over 48 hours. 
-                    Tap the <b>Dispatch</b> tile above to assign transporters or update tracking details.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.warning(f"⚠️ {metrics['bottlenecks']} invoice(s) have remained in Open status for over 48 hours.  \n Tap the Dispatch tile above to assign transporters or update tracking details.")
 
     st.markdown("---")
-    # Render primary operational dashboard underneath
     show_sales_dashboard()
 
+# =====================================================================
+# 4. NATIVE STREAMLIT AUTHENTICATION
+# =====================================================================
+# st.experimental_user (or st.user) persists across F5 and browser reloads natively
+if not st.user.is_logged_in:
+  st.title("🔐 AAPL Sales & Operations Portal")
+  st.write("Please sign in with your authorized Google Workspace account.")
 
-# =====================================================================
-# 4. INITIALIZE AUTHENTICATION STATE
-# =====================================================================
+  # Triggers Google OAuth and sets persistent HTTP-only cookie automatically
+  if st.button("📧 Log in with Google", type="primary"):
+    st.login("google")
+
+  st.stop()
+
+# User is authenticated via root HTTP session cookie
+user_email = st.user.email
+role = get_user_role(user_email)
+
+
+
+if not role:
+  st.error(f"❌ Access Denied: {user_email} is not authorized in the system.")
+  if st.button("Log out"):
+    handle_logout()
+  st.stop()
+
+# Initialize session state keys safely if missing
 if "user_email" not in st.session_state:
-    st.session_state.user_email = None
+  st.session_state["user_email"] = getattr(st.user, "email", None)
+
 if "user_role" not in st.session_state:
-    st.session_state.user_role = None
-
-if not st.session_state.user_email:
-    st.title("🔐 AAPL Sales & Operations Portal")
-    st.subheader("Login")
-
-    query_params = st.query_params
-    if "code" in query_params:
-        try:
-            flow = get_oauth_flow()
-            flow.code_verifier = query_params.get("state")
-            flow.fetch_token(code=query_params["code"])
-            credentials = flow.credentials
-
-            userinfo = requests.get(
-                "https://www.googleapis.com/oauth2/v2/userinfo",
-                headers={"Authorization": f"Bearer {credentials.token}"},
-                timeout=10,
-            ).json()
-            email = userinfo.get("email", "").lower().strip()
-
-            role = get_user_role(email)
-            if role:
-                st.session_state.user_email = email
-                st.session_state.user_role = role
-                st.query_params.clear()
-                st.rerun()
-            else:
-                st.error(f"❌ Access Denied: {email} is not an authorized user.")
-                st.query_params.clear()
-        except Exception as e:
-            st.error(f"❌ Login failed: {e}")
-            st.query_params.clear()
-    else:
-        flow = get_oauth_flow()
-        code_verifier = secrets.token_urlsafe(48)
-        flow.code_verifier = code_verifier
-        auth_url, _ = flow.authorization_url(
-            prompt="consent", state=code_verifier
-        )
-        st.link_button("📧 Log in with Google", auth_url)
-
+  st.session_state["user_role"] = (
+      get_user_role(st.session_state["user_email"])
+      if st.session_state["user_email"]
+      else None
+  )
 # =====================================================================
 # 5. AUTHENTICATED NAVIGATION GATE
 # =====================================================================
-else:
-    # Define Navigation Pages
-    page_home = st.Page(show_home, title="Home", icon="🏠", default=True)
-    page_outstanding = st.Page(
-        show_outstanding_report, title="Outstanding Report", icon="📋"
-    )
-    page_sales = st.Page(
-        show_sales_dashboard, title="Sales vs Target", icon="🎯"
-    )
-    page_exec = st.Page(
-        show_executive_dashboard, title="Executive Dashboard", icon="👔"
-    )
-    page_stock = st.Page(
-        show_stock_position, title="Stock Position", icon="📦"
-    )
-    page_sales360 = st.Page(show_sales_360, title="Sales 360°", icon="🔄")
-    page_delivery = st.Page(
-        show_delivery_dashboard, title="Delivery Dashboard", icon="🚚"
-    )
-    page_scheduler = st.Page(
-        render_scheduler_settings, title="Scheduler Settings", icon="⚙️"
-    )
-    page_followup_queue = st.Page(
-        render_followup_queue, title="Follow-up Queue", icon="📲"
-    )
+page_home = st.Page(show_home, title="Home", icon="🏠", default=True)
+page_outstanding = st.Page(show_outstanding_report, title="Outstanding Report", icon="📋")
+page_sales = st.Page(show_sales_dashboard, title="Sales vs Target", icon="🎯")
+page_legacy_sales = st.Page(show_legacy_sales_dashboard, title="Legacy Tally Dashboard", icon="📊")
+page_exec = st.Page(show_executive_dashboard, title="Executive Dashboard", icon="👔")
+page_stock = st.Page(show_stock_position, title="Stock Position", icon="📦")
+page_sales360 = st.Page(show_sales_360, title="Sales 360°", icon="🔄")
+page_delivery = st.Page(show_delivery_dashboard, title="Delivery Dashboard", icon="🚚")
+page_scheduler = st.Page(render_scheduler_settings, title="Scheduler Settings", icon="⚙️")
+page_followup_queue = st.Page(render_followup_queue, title="Follow-up Queue", icon="📲")
 
-    pages = [
-        page_home,
-        page_outstanding,
-        page_sales,
-        page_exec,
-        page_stock,
-        page_sales360,
-        page_delivery,
-        page_scheduler,
-        page_followup_queue,
-        page_admin := st.Page(
-            show_admin_page, title="Admin Panel", icon="🛠️"
-        ) if st.session_state.user_role == "Admin" else None,
-    ]
+pages = [
+    page_home,
+    page_outstanding,
+    page_sales,
+    page_legacy_sales,
+    page_exec,
+    page_stock,
+    page_sales360,
+    page_delivery,
+    page_scheduler,
+    page_followup_queue,
+]
 
-    pg = st.navigation(pages, position="sidebar", expanded=True)
+if st.session_state.user_role == "Admin":
+    pages.append(st.Page(show_admin_page, title="Admin Panel", icon="🛠️"))
 
-    with st.sidebar:
-        st.markdown("---")
-        st.caption(
-            f"👤 **{st.session_state.user_email}**\n\nRole:"
-            f" **{st.session_state.user_role}**"
-        )
-        if st.button("🚪 Logout", use_container_width=True):
-            st.session_state.user_email = None
-            st.session_state.user_role = None
-            st.rerun()
-        elif st.button("🔄 Refresh Metrics", use_container_width=True):
-            st.rerun()
+pg = st.navigation(pages, position="sidebar", expanded=True)
 
-    pg.run()
+with st.sidebar:
+
+    st.markdown("---")
+    st.caption(f"👤 **{st.session_state.user_email}**\n\nRole: **{st.session_state.user_role}**")
+    if st.button("🚪 Logout", use_container_width=True, key="btn_logout_sb"):
+        handle_logout()
+    elif st.button("🔄 Refresh", use_container_width=True, key="btn_refresh_sb"):
+        st.rerun()
+
+pg.run()

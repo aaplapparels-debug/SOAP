@@ -215,12 +215,23 @@ def run_scheduler():
             bucket = resolve_bucket(max_days, party, global_buckets, party_buckets)
             if not bucket:
                 continue
+               
+                # Ensure 'today' is a date object
+                today = date.today()          
+                last_contacted_raw = data.get("last_contacted")
+                # 1. Safely guard against None, NaN, NaT, or empty values
+                if pd.notna(last_contacted_raw) and last_contacted_raw:
+                    last_dt = pd.to_datetime(last_contacted_raw).date()            
+                    cooldown_days = int(bucket.get("cooldown", 0))
+                    if (today - last_dt).days < cooldown_days:
+                        continue
 
-            # Cadence cooldown check
-            if data["last_contacted"]:
-                last_dt = pd.to_datetime(data["last_contacted"]).date()
-                if today - last_dt < timedelta(days=bucket["cooldown"]):
-                    continue
+
+                # Cadence cooldown check
+                #if data["last_contacted"]:
+                #    last_dt = pd.to_datetime(data["last_contacted"]).date()
+                #    if today - last_dt < timedelta(days=bucket["cooldown"]):
+                #        continue
 
             # Format customized message template
             template_str = bucket["template"] or (
