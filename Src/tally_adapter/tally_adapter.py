@@ -160,17 +160,36 @@ class TallyAdapter:
                     pass
         return pd.DataFrame(rows)
 
-    def _fetch_vouchers_in_range(self, from_date: datetime.date, to_date: datetime.date, include_postdated: bool = False) -> list:
-        """Shared helper: fetches ALL vouchers in a date range with full
-        ledger-entry detail (bill allocations, bank/instrument detail).
-        include_postdated maps to Tally's own SVINCLUDEPOSTDATED flag --
-        without it, Tally's default behavior may exclude future-dated
-        vouchers from the response entirely, not just fail to flag them.
-        Filtering by voucher type happens client-side in each specific
-        extract_* method."""
+    def _fetch_vouchers_in_range(
+        self, 
+        from_date: datetime.date, 
+        to_date: datetime.date, 
+        include_postdated: bool = False,
+        voucher_type: str = None  # Optional: defaults to None so existing behavior is untouched
+    ) -> list:
+        """
+        Shared helper: fetches vouchers in a date range.
+        If voucher_type is specified (e.g., 'Receipt' or 'Credit Note'),
+        filters at the TDL collection level to prevent memory exhaustion and timeouts.
+        If voucher_type is None, behaves identically to the original extraction.
+        """
         formatted_from = from_date.strftime('%Y%m%d')
         formatted_to = to_date.strftime('%Y%m%d')
         postdated_line = '<SVINCLUDEPOSTDATED TYPE="Logical">Yes</SVINCLUDEPOSTDATED>' if include_postdated else ''
+
+        # TDL Collection-level filter (only injected if voucher_type is passed)
+        if voucher_type:
+            tdl_filter_tag = "<FILTERS>VchTypeFilter</FILTERS>"
+            tdl_system_formula = f"""
+                <SYSTEM TYPE="Formulae" NAME="VchTypeFilter">
+                    $$Is{voucher_type.replace(' ', '')}:$VoucherTypeName OR $$StringPart:$VoucherTypeName 0 {len(voucher_type)} = "{voucher_type}"
+                </SYSTEM>
+            """
+        else:
+            tdl_filter_tag = ""
+            tdl_system_formula = ""
+
+        # Safe field list covering all fields needed by receipts, CNs, and payment extractors
         fetch_fields = (
             "DATE, VOUCHERNUMBER, VOUCHERTYPENAME, PARTYLEDGERNAME, "
             "INSTRUMENTDATE, INSTRUMENTNUMBER, BANKALLOCATIONS.*, "
@@ -197,14 +216,17 @@ class TallyAdapter:
                             <COLLECTION NAME="VoucherColl" ISINITIALISE="Yes">
                                 <TYPE>Voucher</TYPE>
                                 <FETCH>{fetch_fields}</FETCH>
+                                {tdl_filter_tag}
                             </COLLECTION>
+                            {tdl_system_formula}
                         </TDLMESSAGE>
                     </TDL>
                 </DESC>
             </BODY>
         </ENVELOPE>"""
 
-        res = requests.post(self.tally_url, data=req_xml, headers={'Content-Type': 'text/xml'}, timeout=180)
+        # Increased timeout to 300s to accommodate heavy network loads
+        res = requests.post(self.tally_url, data=req_xml, headers={'Content-Type': 'text/xml'}, timeout=300)
         res.raise_for_status()
         clean_xml = sanitize_xml(res.content)
         root = ET.fromstring(clean_xml)
@@ -343,23 +365,28 @@ class TallyAdapter:
 
     def extract_receipts(self) -> pd.DataFrame:
         """
-        Receipt vouchers, one row per bill reference settled (a single
-        receipt can settle multiple invoices) -- now carrying full
-        payment detail (mode_of_payment, instrument, instrument_date,
-        bank) directly on each row.
-
-        Date range extends FORWARD to the end of the current financial
-        year, not just up to today -- necessary now that PDC detection
-        is just "instrument_date > today" applied to this same table.
-        A receipt dated in the future (a post-dated cheque) needs to
-        actually be IN this table for that filter to find it at all.
+        Receipt vouchers with payment details.
+        Chunks date ranges into 90-day intervals to eliminate HTTP timeouts in Tally.
         """
         fy_start_year = self.today.year if self.today.month >= 4 else self.today.year - 1
         fy_end = datetime.date(fy_start_year + 1, 3, 31)
 
-        vouchers = self._fetch_vouchers_in_range(self.cutoff, fy_end, include_postdated=True)
+        # 90-day chunked retrieval
+        all_vouchers = []
+        chunk_start = self.cutoff
+        while chunk_start <= fy_end:
+            chunk_end = min(chunk_start + datetime.timedelta(days=90), fy_end)
+            vouchers = self._fetch_vouchers_in_range(
+                from_date=chunk_start, 
+                to_date=chunk_end, 
+                include_postdated=True,
+                voucher_type="Receipt"  # Targeted filter prevents scanning other voucher types
+            )
+            all_vouchers.extend(vouchers)
+            chunk_start = chunk_end + datetime.timedelta(days=1)
+
         rows = []
-        for v in vouchers:
+        for v in all_vouchers:
             vch_type = v.findtext('VOUCHERTYPENAME', '').strip().upper()
             if 'RECEIPT' not in vch_type:
                 continue
@@ -383,10 +410,6 @@ class TallyAdapter:
                 for ref in bill_refs:
                     rows.append({
                         'receipt_date': vch_date, 'voucher_number': vch_no,
-                        # Prefer the specific ledger this bill actually
-                        # belongs to (correct for multi-party vouchers);
-                        # fall back to the voucher-level party only if
-                        # that ledger name somehow came through empty.
                         'customer_name': ref['party_ledger_name'] or party,
                         'bill_reference': ref['bill_reference'],
                         'bill_type': ref['bill_type'], 'amount': ref['bill_amount'],
