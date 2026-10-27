@@ -193,16 +193,16 @@ def show_home():
 
     with col1:
         if st.button(f"🚚 Dispatch\n{metrics['open_dispatches']} Pending", key="hub_btn_disp", use_container_width=True):
-            st.switch_page(page_delivery)
+            st.switch_page(available_portal_pages["delivery"])
     with col2:
         if st.button(f"📋 Debtors\n{metrics['outstanding_str']}", key="hub_btn_os", use_container_width=True):
-            st.switch_page(page_outstanding)
+            st.switch_page(available_portal_pages["outstanding"])
     with col3:
         if st.button(f"📦 Inventory\n{metrics['stock_str']}", key="hub_btn_stk", use_container_width=True):
-            st.switch_page(page_stock)
+            st.switch_page(available_portal_pages["stock"])
     with col4:
         if st.button(f"🎯 MTD Sales\n{metrics['mtd_sales_str']}", key="hub_btn_sal", use_container_width=True):
-            st.switch_page(page_sales)
+            st.switch_page(available_portal_pages["sales"])
 
     if metrics["bottlenecks"] > 0:
         st.warning(f"⚠️ {metrics['bottlenecks']} invoice(s) have remained in Open status for over 48 hours.  \n Tap the Dispatch tile above to assign transporters or update tracking details.")
