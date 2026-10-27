@@ -228,8 +228,6 @@ if not st.user.is_logged_in:
 user_email = st.user.email
 role = get_user_role(user_email)
 
-
-
 if not role:
   st.error(f"❌ Access Denied: {user_email} is not authorized in the system.")
   if st.button("Log out"):
@@ -247,44 +245,65 @@ if "user_role" not in st.session_state:
       else None
   )
 # =====================================================================
-# 5. AUTHENTICATED NAVIGATION GATE
+# 5. DYNAMIC AUTHENTICATED NAVIGATION GATE
 # =====================================================================
-page_home = st.Page(show_home, title="Home", icon="🏠", default=True)
-page_outstanding = st.Page(show_outstanding_report, title="Outstanding Report", icon="📋")
-page_sales = st.Page(show_sales_dashboard, title="Sales vs Target", icon="🎯")
-page_legacy_sales = st.Page(show_legacy_sales_dashboard, title="Legacy Tally Dashboard", icon="📊")
-page_exec = st.Page(show_executive_dashboard, title="Executive Dashboard", icon="👔")
-page_stock = st.Page(show_stock_position, title="Stock Position", icon="📦")
-page_sales360 = st.Page(show_sales_360, title="Sales 360°", icon="🔄")
-page_delivery = st.Page(show_delivery_dashboard, title="Delivery Dashboard", icon="🚚")
-page_scheduler = st.Page(render_scheduler_settings, title="Scheduler Settings", icon="⚙️")
-page_followup_queue = st.Page(render_followup_queue, title="Follow-up Queue", icon="📲")
+@st.cache_data(ttl=300)
+def get_allowed_page_ids_for_role(role: str) -> set:
+    """Fetch allowed page IDs from database for a specific role."""
+    if not role:
+        return {"home"}
+    if role == "Admin":
+        # Admin retains access to all modules as failsafe
+        return {
+            "home", "sales", "legacy_sales", "outstanding", "exec", 
+            "stock", "sales360", "delivery", "scheduler", "followup_queue", "admin"
+        }
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            res = conn.execute(
+                text("SELECT page_id FROM role_page_permissions WHERE role = :r AND is_allowed = TRUE"),
+                {"r": role}
+            ).fetchall()
+            return {r[0] for r in res}
+    except Exception:
+        # Fallback to standard view if table not reachable
+        return {"home", "sales", "legacy_sales", "stock"}
 
-pages = [
-    page_home,
-    page_outstanding,
-    page_sales,
-    page_legacy_sales,
-    page_exec,
-    page_stock,
-    page_sales360,
-    page_delivery,
-    page_scheduler,
-    page_followup_queue,
+# Map page identifiers to Page objects
+available_portal_pages = {
+    "home": st.Page(show_home, title="Home", icon="🏠", default=True),
+    "sales": st.Page(show_sales_dashboard, title="Sales vs Target", icon="🎯"),
+    "legacy_sales": st.Page(show_legacy_sales_dashboard, title="Legacy Tally Dashboard", icon="📊"),
+    "outstanding": st.Page(show_outstanding_report, title="Outstanding Report", icon="📋"),
+    "exec": st.Page(show_executive_dashboard, title="Executive Dashboard", icon="👔"),
+    "stock": st.Page(show_stock_position, title="Stock Position", icon="📦"),
+    "sales360": st.Page(show_sales_360, title="Sales 360°", icon="🔄"),
+    "delivery": st.Page(show_delivery_dashboard, title="Delivery Dashboard", icon="🚚"),
+    "scheduler": st.Page(render_scheduler_settings, title="Scheduler Settings", icon="⚙️"),
+    "followup_queue": st.Page(render_followup_queue, title="Follow-up Queue", icon="📲"),
+    "admin": st.Page(show_admin_page, title="Admin Panel", icon="🛠️"),
+}
+
+# Read user's role and get active permissions
+current_user_role = st.session_state.get("user_role", "Viewer")
+allowed_ids = get_allowed_page_ids_for_role(current_user_role)
+
+# Build dynamic page list matching permissions (always keep Home default)
+active_pages = [
+    page_obj for pid, page_obj in available_portal_pages.items()
+    if pid in allowed_ids or pid == "home"
 ]
 
-if st.session_state.user_role == "Admin":
-    pages.append(st.Page(show_admin_page, title="Admin Panel", icon="🛠️"))
-
-pg = st.navigation(pages, position="sidebar", expanded=True)
+pg = st.navigation(active_pages, position="sidebar", expanded=True)
 
 with st.sidebar:
-
     st.markdown("---")
-    st.caption(f"👤 **{st.session_state.user_email}**\n\nRole: **{st.session_state.user_role}**")
+    st.caption(f"👤 **{st.session_state.get('user_email', '')}**\n\nRole: **{current_user_role}**")
     if st.button("🚪 Logout", use_container_width=True, key="btn_logout_sb"):
         handle_logout()
     if st.button("🔄 Refresh", use_container_width=True, key="btn_refresh_sb"):
+        st.cache_data.clear()
         st.rerun()
 
 pg.run()

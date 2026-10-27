@@ -330,6 +330,10 @@ CREATE TABLE IF NOT EXISTS customer_followup_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_customer_name_followup
+ON customer_followup_logs (customer_name)
+WHERE status IN ('PENDING', 'QUEUED', 'OPEN');
+
 CREATE TABLE IF NOT EXISTS portal_ticker_config (
     id SERIAL PRIMARY KEY,
     active_mode VARCHAR(30) DEFAULT 'BROADCAST', -- 'BROADCAST', 'TOP_ITEMS', 'TOP_CUSTOMERS'
@@ -338,4 +342,12 @@ CREATE TABLE IF NOT EXISTS portal_ticker_config (
     metric_type VARCHAR(10) DEFAULT 'QTY',       -- 'QTY' or 'VALUE' (for customers)
     is_enabled BOOLEAN DEFAULT TRUE,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS role_page_permissions (
+    role VARCHAR(50) NOT NULL,
+    page_id VARCHAR(50) NOT NULL,
+    is_allowed BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (role, page_id)
 );

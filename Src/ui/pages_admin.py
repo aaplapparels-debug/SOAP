@@ -162,6 +162,85 @@ def show_admin_page():
                     st.divider()
         except Exception as e:
             st.error(f"Error fetching users: {e}")
+        
+        # -------------------------------------------------------------
+        # 3. Dynamic Role-Based Menu Access Matrix
+        # -------------------------------------------------------------
+        st.markdown("---")
+        st.subheader("🛡️ Role-Based Page Access Matrix")
+        st.caption("Control which portal modules are accessible to each user role. Changes apply on user refresh/re-login.")
+
+        AVAILABLE_PAGES = {
+            "home": "Home Hub",
+            "sales": "Sales vs Target",
+            "legacy_sales": "Legacy Tally Dashboard",
+            "outstanding": "Outstanding Report",
+            "exec": "Executive Dashboard",
+            "stock": "Stock Position",
+            "sales360": "Sales 360°",
+            "delivery": "Delivery Dashboard",
+            "scheduler": "Scheduler Settings",
+            "followup_queue": "Follow-up Queue",
+            "admin": "Admin Panel",
+        }
+        ROLES = ["Admin", "Manager", "Sales", "Viewer"]
+
+        try:
+            with engine.connect() as conn:
+                perm_df = pd.read_sql(
+                    text("SELECT role, page_id, is_allowed FROM role_page_permissions;"),
+                    conn
+                )
+
+            # Build matrix dict: {page_id: {role: is_allowed}}
+            matrix = {p: {r: False for r in ROLES} for p in AVAILABLE_PAGES}
+            for _, r in perm_df.iterrows():
+                if r["page_id"] in matrix and r["role"] in matrix[r["page_id"]]:
+                    matrix[r["page_id"]][r["role"]] = bool(r["is_allowed"])
+
+            # Render as interactive Streamlit form
+            with st.form("role_permissions_form"):
+                header_cols = st.columns([3] + [1.5 for _ in ROLES])
+                header_cols[0].markdown("**Page / Module**")
+                for idx, role_name in enumerate(ROLES):
+                    header_cols[idx + 1].markdown(f"**{role_name}**")
+
+                new_permissions = []
+                for page_id, page_label in AVAILABLE_PAGES.items():
+                    row_cols = st.columns([3] + [1.5 for _ in ROLES])
+                    row_cols[0].write(f"📄 {page_label}")
+                    for idx, role_name in enumerate(ROLES):
+                        current_val = matrix[page_id][role_name]
+                        # Admin panel for Admin is always locked on
+                        disabled = (role_name == "Admin" and page_id in ["home", "admin"])
+                        checked = True if disabled else current_val
+                        val = row_cols[idx + 1].checkbox(
+                            f"{page_id}_{role_name}",
+                            value=checked,
+                            key=f"perm_{role_name}_{page_id}",
+                            label_visibility="collapsed",
+                            disabled=disabled
+                        )
+                        new_permissions.append((role_name, page_id, val))
+
+                if st.form_submit_button("💾 Save Page Access Matrix", type="primary"):
+                    with engine.begin() as conn:
+                        for r_name, p_id, allowed in new_permissions:
+                            conn.execute(
+                                text("""
+                                    INSERT INTO role_page_permissions (role, page_id, is_allowed, updated_at)
+                                    VALUES (:r, :p, :a, NOW())
+                                    ON CONFLICT (role, page_id)
+                                    DO UPDATE SET is_allowed = EXCLUDED.is_allowed, updated_at = NOW();
+                                """),
+                                {"r": r_name, "p": p_id, "a": allowed}
+                            )
+                    st.cache_data.clear()
+                    st.success("Role permissions updated successfully!")
+                    st.rerun()
+
+        except Exception as e:
+            st.error(f"Error loading permission matrix: {e}")
 
     # =========================================================================
     # TAB 2: JC & TARGETS ADMINISTRATION

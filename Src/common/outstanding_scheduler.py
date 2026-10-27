@@ -10,6 +10,57 @@ import pandas as pd
 import requests
 from sqlalchemy import text
 
+from sqlalchemy import text
+
+upsert_followup_sql = text("""
+    INSERT INTO customer_followup_logs (
+        customer_name,
+        phone,
+        email,
+        bill_ref,
+        followup_type,
+        severity_level,
+        total_outstanding,
+        overdue_amount,
+        overdue_days,
+        promised_pay_date,
+        notes,
+        salesperson,
+        status,
+        created_at
+    )
+    VALUES (
+        :customer_name,
+        :phone,
+        :email,
+        :bill_ref,
+        :followup_type,
+        :severity_level,
+        :total_outstanding,
+        :overdue_amount,
+        :overdue_days,
+        :promised_pay_date,
+        :notes,
+        :salesperson,
+        'PENDING',
+        CURRENT_TIMESTAMP
+    )
+    ON CONFLICT (customer_name) WHERE status IN ('PENDING', 'QUEUED', 'OPEN')
+    DO UPDATE SET
+        phone = COALESCE(EXCLUDED.phone, customer_followup_logs.phone),
+        email = COALESCE(EXCLUDED.email, customer_followup_logs.email),
+        bill_ref = EXCLUDED.bill_ref,
+        followup_type = EXCLUDED.followup_type,
+        severity_level = EXCLUDED.severity_level,
+        total_outstanding = EXCLUDED.total_outstanding,
+        overdue_amount = EXCLUDED.overdue_amount,
+        overdue_days = EXCLUDED.overdue_days,
+        promised_pay_date = COALESCE(EXCLUDED.promised_pay_date, customer_followup_logs.promised_pay_date),
+        notes = EXCLUDED.notes,
+        salesperson = COALESCE(EXCLUDED.salesperson, customer_followup_logs.salesperson),
+        created_at = CURRENT_TIMESTAMP;
+""")
+
 # Ensure Src/ directory is in sys.path so imports resolve cleanly from any runner
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
@@ -217,14 +268,14 @@ def run_scheduler():
                 continue
                
                 # Ensure 'today' is a date object
-                today = date.today()          
-                last_contacted_raw = data.get("last_contacted")
-                # 1. Safely guard against None, NaN, NaT, or empty values
-                if pd.notna(last_contacted_raw) and last_contacted_raw:
-                    last_dt = pd.to_datetime(last_contacted_raw).date()            
-                    cooldown_days = int(bucket.get("cooldown", 0))
-                    if (today - last_dt).days < cooldown_days:
-                        continue
+            today = date.today()          
+            last_contacted_raw = data.get("last_contacted")
+            # 1. Safely guard against None, NaN, NaT, or empty values
+            if pd.notna(last_contacted_raw) and last_contacted_raw:
+                last_dt = pd.to_datetime(last_contacted_raw).date()            
+                cooldown_days = int(bucket.get("cooldown", 0))
+                if (today - last_dt).days < cooldown_days:
+                    continue
 
 
                 # Cadence cooldown check
@@ -258,13 +309,26 @@ def run_scheduler():
             task_status = "SENT" if was_sent else "PENDING"
             #sys.stdout.write(f"Processing party: {party},{data['phone']},{data['email']}\n")  
             #sys.stdout.flush()
-            # Insert execution log
+            # Upsert execution log (deduplicates against unattended/pending tasks)
             conn.execute(
                 text("""
                     INSERT INTO customer_followup_logs 
                     (customer_name, phone, email, followup_type, severity_level, 
-                     total_outstanding, overdue_amount, overdue_days, salesperson, notes, status)
-                    VALUES (:party, :phone, :email, :ftype, :severity, :tot, :overdue, :days, :sp, :notes, :status);
+                     total_outstanding, overdue_amount, overdue_days, salesperson, notes, status, created_at)
+                    VALUES (:party, :phone, :email, :ftype, :severity, :tot, :overdue, :days, :sp, :notes, :status, CURRENT_TIMESTAMP)
+                    ON CONFLICT (customer_name) WHERE status IN ('PENDING', 'QUEUED', 'OPEN')
+                    DO UPDATE SET
+                        phone = COALESCE(EXCLUDED.phone, customer_followup_logs.phone),
+                        email = COALESCE(EXCLUDED.email, customer_followup_logs.email),
+                        followup_type = EXCLUDED.followup_type,
+                        severity_level = EXCLUDED.severity_level,
+                        total_outstanding = EXCLUDED.total_outstanding,
+                        overdue_amount = EXCLUDED.overdue_amount,
+                        overdue_days = EXCLUDED.overdue_days,
+                        salesperson = COALESCE(EXCLUDED.salesperson, customer_followup_logs.salesperson),
+                        notes = EXCLUDED.notes,
+                        status = EXCLUDED.status,
+                        created_at = CURRENT_TIMESTAMP;
                 """),
                 {
                     "party": party,
@@ -277,8 +341,8 @@ def run_scheduler():
                     "days": max_days,
                     "sp": data["salesperson"],
                     "notes": formatted_msg,
-                    "status": task_status
-                }
+                    "status": task_status,
+                },
             )
 
             # Upsert customer cadence state
