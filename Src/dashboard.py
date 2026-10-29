@@ -80,7 +80,7 @@ def fetch_hub_live_metrics():
                 AND s.doc_prefix = d.doc_prefix 
                 AND CAST(s.doc_no AS VARCHAR) = d.doc_no
             WHERE s.source_system = 'shoper'
-              AND s.sale_date >= CURRENT_DATE - INTERVAL '30 days'
+              AND s.sale_date >= CURRENT_DATE - INTERVAL '20 days'
               AND COALESCE(d.status, 'Open') = 'Open'
         """)).scalar() or 0
 
