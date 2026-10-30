@@ -319,6 +319,7 @@ def show_stock_position():
                 SELECT 
                     i.item_code,
                     i.item_desc,
+                    i.size,
                     i.category_1,
                     i.division,
                     -- Live current stock
@@ -398,7 +399,7 @@ def show_stock_position():
 
                 st.dataframe(
                     m_df[[
-                        "item_code", "item_desc", "category_1", "division",
+                        "item_code", "item_desc", "size", "category_1", "division",
                         "opening_stock_qty", "purchases_in_qty", "returns_in_qty", 
                         "sales_out_qty", "net_sales_qty", "period_end_stock_qty", "current_stock_qty"
                     ]],
@@ -407,6 +408,7 @@ def show_stock_position():
                     column_config={
                         "item_code": st.column_config.TextColumn("Item Code", width="small"),
                         "item_desc": st.column_config.TextColumn("Description", width="large"),
+                        "size": st.column_config.TextColumn("Size", width="small"),
                         "category_1": st.column_config.TextColumn("Category", width="small"),
                         "division": st.column_config.TextColumn("Div", width="small"),
                         "opening_stock_qty": st.column_config.NumberColumn("Opening", format="%d"),
@@ -460,6 +462,7 @@ def show_stock_position():
                 SELECT 
                     i.item_code,
                     i.item_desc,
+                    i.size,
                     i.category_1,
                     i.division,
                     i.stock_qty,
@@ -524,6 +527,7 @@ def show_stock_position():
                     column_config={
                         "item_code": st.column_config.TextColumn("Item Code", width="small"),
                         "item_desc": st.column_config.TextColumn("Description", width="large"),
+                        "size": st.column_config.TextColumn("Size", width="small"),
                         "category_1": st.column_config.TextColumn("Category", width="small"),
                         "division": st.column_config.TextColumn("Div", width="small"),
                         "stock_qty": st.column_config.NumberColumn("Current Stock", format="%d"),
@@ -575,6 +579,7 @@ def show_stock_position():
                 SELECT 
                     po.item_code,
                     i.item_desc,
+                    i.size,
                     i.category_1,
                     po.division,
                     po.pending_orders_count,
@@ -639,6 +644,7 @@ def show_stock_position():
                     column_config={
                         "item_code": st.column_config.TextColumn("Item Code", width="small"),
                         "item_desc": st.column_config.TextColumn("Description", width="large"),
+                        "size": st.column_config.TextColumn("Size", width="small"),
                         "category_1": st.column_config.TextColumn("Category", width="small"),
                         "division": st.column_config.TextColumn("Div", width="small"),
                         "pending_orders_count": st.column_config.NumberColumn("Orders", format="%d"),
